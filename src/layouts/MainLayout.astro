@@ -1,0 +1,39 @@
+---
+import BaseHead from "../components/BaseHead.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <BaseHead title={title} description={description} />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到正文</a>
+    <Header />
+    <main id="main-content" class="container">
+      <slot />
+    </main>
+    <Footer />
+    <script is:inline>
+      const root = document.documentElement;
+      const storedTheme = localStorage.getItem("theme");
+      const initialTheme =
+        storedTheme || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      root.dataset.theme = initialTheme;
+      document.querySelector("#theme-toggle")?.addEventListener("click", () => {
+        const nextTheme = root.dataset.theme === "dark" ? "light" : "dark";
+        root.dataset.theme = nextTheme;
+        localStorage.setItem("theme", nextTheme);
+      });
+    </script>
+  </body>
+</html>

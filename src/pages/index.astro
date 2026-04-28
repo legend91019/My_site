@@ -1,49 +1,73 @@
 ---
-import BaseHead from '../components/BaseHead.astro';
-import Footer from '../components/Footer.astro';
-import Header from '../components/Header.astro';
-import { SITE_DESCRIPTION, SITE_TITLE } from '../consts';
+import { getCollection } from "astro:content";
+import MainLayout from "../layouts/MainLayout.astro";
+import { siteConfig } from "../config/site";
+import { readingTimeFromText, sortPosts } from "../utils/posts";
+
+const allPosts = sortPosts(await getCollection("posts"));
+const featured = allPosts.slice(0, 6);
 ---
 
-<!doctype html>
-<html lang="en">
-	<head>
-		<BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
-	</head>
-	<body>
-		<Header />
-		<main>
-			<h1>🧑‍🚀 Hello, Astronaut!</h1>
-			<p>
-				Welcome to the official <a href="https://astro.build/">Astro</a> blog starter template. This template
-				serves as a lightweight, minimally-styled starting point for anyone looking to build a personal
-				website, blog, or portfolio with Astro.
-			</p>
-			<p>
-				This template comes with a few integrations already configured in your
-				<code>astro.config.mjs</code> file. You can customize your setup with
-				<a href="https://astro.build/integrations">Astro Integrations</a> to add tools like Tailwind,
-				React, or Vue to your project.
-			</p>
-			<p>Here are a few ideas on how to get started with the template:</p>
-			<ul>
-				<li>Edit this page in <code>src/pages/index.astro</code></li>
-				<li>Edit the site header items in <code>src/components/Header.astro</code></li>
-				<li>Add your name to the footer in <code>src/components/Footer.astro</code></li>
-				<li>Check out the included blog posts in <code>src/content/blog/</code></li>
-				<li>Customize the blog post page layout in <code>src/layouts/BlogPost.astro</code></li>
-			</ul>
-			<p>
-				Have fun! If you get stuck, remember to
-				<a href="https://docs.astro.build/">read the docs</a>
-				or <a href="https://astro.build/chat">join us on Discord</a> to ask questions.
-			</p>
-			<p>
-				Looking for a blog template with a bit more personality? Check out
-				<a href="https://github.com/Charca/astro-blog-template">astro-blog-template</a>
-				by <a href="https://twitter.com/Charca">Maxi Ferreira</a>.
-			</p>
-		</main>
-		<Footer />
-	</body>
-</html>
+<MainLayout title={siteConfig.title} description={siteConfig.description}>
+  <section class="hero card">
+    <h1>{siteConfig.title}</h1>
+    <p>{siteConfig.description}</p>
+  </section>
+  <section class="posts">
+    <h2>最新文章</h2>
+    <div class="grid">
+      {
+        featured.map((post) => (
+          <article class="card">
+            <h3><a href={`/posts/${post.id}/`}>{post.data.title}</a></h3>
+            <p>{post.data.summary}</p>
+            <p class="meta">
+              <time datetime={post.data.date.toISOString()}>{post.data.date.toLocaleDateString("zh-CN")}</time>
+              <span> · </span>
+              <span>{readingTimeFromText(post.body)} 分钟阅读</span>
+            </p>
+            <div class="chips">
+              {post.data.tags.map((tag) => (
+                <a href={`/tags/${encodeURIComponent(tag)}/`} class="chip">
+                  #{tag}
+                </a>
+              ))}
+            </div>
+          </article>
+        ))
+      }
+    </div>
+  </section>
+</MainLayout>
+
+<style>
+  .hero {
+    margin-top: 2rem;
+  }
+  .hero h1 {
+    margin: 0 0 0.5rem;
+  }
+  .posts {
+    margin-top: 2rem;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+  }
+  .meta {
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .chips {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .chip {
+    font-size: 0.8rem;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    padding: 0.2rem 0.55rem;
+  }
+</style>

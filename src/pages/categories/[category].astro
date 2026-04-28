@@ -1,0 +1,32 @@
+---
+import { getCollection } from "astro:content";
+import MainLayout from "../../layouts/MainLayout.astro";
+import { siteConfig } from "../../config/site";
+import { sortPosts } from "../../utils/posts";
+
+export async function getStaticPaths() {
+  const posts = sortPosts(await getCollection("posts"));
+  const categories = [...new Set(posts.map((post) => post.data.category))];
+  return categories.map((category) => ({
+    params: { category },
+    props: { category },
+  }));
+}
+
+const { category } = Astro.props;
+const posts = sortPosts(await getCollection("posts")).filter((post) => post.data.category === category);
+---
+
+<MainLayout title={`分类: ${category} - ${siteConfig.title}`} description={`分类 ${category} 下的文章`}>
+  <h1>分类：{category}</h1>
+  <div class="list">
+    {posts.map((post) => <article class="card"><a href={`/posts/${post.id}/`}>{post.data.title}</a></article>)}
+  </div>
+</MainLayout>
+
+<style>
+  .list {
+    display: grid;
+    gap: 0.75rem;
+  }
+</style>

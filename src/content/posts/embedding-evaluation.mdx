@@ -1,0 +1,28 @@
+---
+title: "中文 Embedding 评测框架：离线指标与在线反馈"
+summary: "构建可复用的中文 embedding 评测流程，并建立从离线指标到线上点击反馈的闭环。"
+date: 2026-04-12
+tags: ["Embedding", "评测", "NLP"]
+category: "评测体系"
+draft: false
+---
+
+评测 embedding 时，单一指标很容易误导优化方向。
+
+## 离线阶段
+
+离线建议同时观察：
+
+- 语义相似度任务；
+- 检索召回任务；
+- 分类迁移任务。
+
+```python
+def score_report(sim, recall, cls):
+    # 简单示例：按业务权重聚合三个指标
+    return 0.4 * sim + 0.4 * recall + 0.2 * cls
+```
+
+## 在线阶段
+
+线上要配合点击率、停留时长和人工抽检。离线分数高，不代表线上一定更好。

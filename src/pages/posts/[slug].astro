@@ -1,0 +1,113 @@
+---
+import { getCollection, render } from "astro:content";
+import MainLayout from "../../layouts/MainLayout.astro";
+import { siteConfig } from "../../config/site";
+
+export async function getStaticPaths() {
+  const posts = await getCollection("posts", ({ data }) => !data.draft);
+  return posts.map((post) => ({ params: { slug: post.id }, props: { post } }));
+}
+
+const { post } = Astro.props;
+const { Content, headings } = await render(post);
+const description = post.data.summary;
+const tocHeadings = headings.filter((heading) => heading.depth <= 3);
+---
+
+<MainLayout title={`${post.data.title} - ${siteConfig.title}`} description={description}>
+  <div class="progress" id="reading-progress"></div>
+  <article class="article-wrap">
+    <aside class="toc card">
+      <h2>目录</h2>
+      <ul>
+        {
+          tocHeadings.map((heading) => (
+            <li class={`depth-${heading.depth}`}>
+              <a href={`#${heading.slug}`}>{heading.text}</a>
+            </li>
+          ))
+        }
+      </ul>
+    </aside>
+    <div class="prose card article">
+      <h1>{post.data.title}</h1>
+      <p class="meta">
+        <a href={`/categories/${encodeURIComponent(post.data.category)}/`}>{post.data.category}</a> ·
+        <time datetime={post.data.date.toISOString()}> {post.data.date.toLocaleDateString("zh-CN")}</time>
+      </p>
+      <Content />
+      <section class="comments">
+        <h2>评论</h2>
+        <script
+          src="https://giscus.app/client.js"
+          data-repo={siteConfig.comments.repo}
+          data-repo-id={siteConfig.comments.repoId}
+          data-category={siteConfig.comments.category}
+          data-category-id={siteConfig.comments.categoryId}
+          data-mapping="pathname"
+          data-strict="0"
+          data-reactions-enabled="1"
+          data-emit-metadata="0"
+          data-input-position="top"
+          data-theme="preferred_color_scheme"
+          data-lang="zh-CN"
+          crossorigin="anonymous"
+          async
+        ></script>
+      </section>
+    </div>
+  </article>
+  <script is:inline>
+    const progress = document.getElementById("reading-progress");
+    if (progress) {
+      const updateProgress = () => {
+        const max = document.documentElement.scrollHeight - window.innerHeight;
+        const percent = max <= 0 ? 0 : (window.scrollY / max) * 100;
+        progress.style.width = `${percent}%`;
+      };
+      updateProgress();
+      document.addEventListener("scroll", updateProgress, { passive: true });
+    }
+  </script>
+</MainLayout>
+
+<style>
+  .progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 3px;
+    width: 0;
+    background: var(--accent);
+    z-index: 999;
+  }
+  .article-wrap {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    gap: 1rem;
+    margin-top: 1.5rem;
+  }
+  .toc {
+    position: sticky;
+    top: 84px;
+    height: fit-content;
+  }
+  .toc ul {
+    margin: 0;
+    padding-left: 1rem;
+  }
+  .meta {
+    color: var(--muted);
+  }
+  .article {
+    padding: 2rem;
+  }
+  @media (max-width: 960px) {
+    .article-wrap {
+      grid-template-columns: 1fr;
+    }
+    .toc {
+      position: static;
+    }
+  }
+</style>

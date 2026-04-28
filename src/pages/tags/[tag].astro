@@ -1,0 +1,29 @@
+---
+import { getCollection } from "astro:content";
+import MainLayout from "../../layouts/MainLayout.astro";
+import { siteConfig } from "../../config/site";
+import { sortPosts } from "../../utils/posts";
+
+export async function getStaticPaths() {
+  const posts = sortPosts(await getCollection("posts"));
+  const tags = [...new Set(posts.flatMap((post) => post.data.tags))];
+  return tags.map((tag) => ({ params: { tag }, props: { tag } }));
+}
+
+const { tag } = Astro.props;
+const posts = sortPosts(await getCollection("posts")).filter((post) => post.data.tags.includes(tag));
+---
+
+<MainLayout title={`标签: ${tag} - ${siteConfig.title}`} description={`标签 ${tag} 下的文章`}>
+  <h1>标签：{tag}</h1>
+  <div class="list">
+    {posts.map((post) => <article class="card"><a href={`/posts/${post.id}/`}>{post.data.title}</a></article>)}
+  </div>
+</MainLayout>
+
+<style>
+  .list {
+    display: grid;
+    gap: 0.75rem;
+  }
+</style>

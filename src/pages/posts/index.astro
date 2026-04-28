@@ -1,0 +1,40 @@
+---
+import { getCollection } from "astro:content";
+import MainLayout from "../../layouts/MainLayout.astro";
+import { siteConfig } from "../../config/site";
+import { sortPosts } from "../../utils/posts";
+
+const posts = sortPosts(await getCollection("posts"));
+---
+
+<MainLayout title={`全部文章 - ${siteConfig.title}`} description="全部技术文章列表">
+  <section>
+    <h1>全部文章</h1>
+    <div class="list">
+      {
+        posts.map((post) => (
+          <article class="card item">
+            <h2><a href={`/posts/${post.id}/`}>{post.data.title}</a></h2>
+            <p>{post.data.summary}</p>
+            <p class="meta">{post.data.category} · {post.data.date.toLocaleDateString("zh-CN")}</p>
+          </article>
+        ))
+      }
+    </div>
+  </section>
+</MainLayout>
+
+<style>
+  .list {
+    display: grid;
+    gap: 1rem;
+  }
+  .item h2 {
+    margin: 0;
+    font-size: 1.2rem;
+  }
+  .meta {
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+</style>
