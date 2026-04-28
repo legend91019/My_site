@@ -1,9 +1,9 @@
 export const siteConfig = {
-  title: "林风技术博客",
-  description: "记录 NLP、LLM、机器学习与工程实践的技术长文。",
+  title: "天庭",
+  description: "记录王勇顺的AI学习,工程实践,以及各种经历。",
   siteUrl: "https://example.com",
-  author: "Your Name",
-  github: "https://github.com/yourname",
+  author: "王勇顺",
+  github: "https://github.com/legend91019/My_site",
   nav: [
     { href: "/", label: "首页" },
     { href: "/posts", label: "文章" },
