@@ -3,13 +3,17 @@ import { config, fields, collection } from '@keystatic/core';
 
 export default config({
   storage: {
-    kind: 'local', // 先用本地模式调试
+    kind: 'cloud', // 开启云端模式
+  },
+  cloud: {
+    // 填入图片中显示的 Project key
+    project: 'manba-team/sitewriting', 
   },
   collections: {
     posts: collection({
       label: '文章',
       slugField: 'title',
-      path: 'src/content/posts/*', // 确保指向你存放 .md 文件的实际路径
+      path: 'src/content/posts/*',
       format: { contentField: 'content' },
       schema: {
         title: fields.slug({ name: { label: '标题' } }),
@@ -18,7 +22,10 @@ export default config({
           formatting: true,
           dividers: true,
           links: true,
-          images: true,
+          images: {
+            directory: 'public/images/posts',
+            publicPath: '/images/posts/',
+          },
         }),
       },
     }),
