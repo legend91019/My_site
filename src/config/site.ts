@@ -1,7 +1,7 @@
 export const siteConfig = {
   title: "天庭",
   description: "记录王勇顺的AI学习,工程实践,以及各种经历。",
-  siteUrl: "https://example.com",
+  siteUrl: "https://my-site-ebon-eta.vercel.app/",
   author: "王勇顺",
   github: "https://github.com/legend91019/My_site",
   nav: [
@@ -16,9 +16,9 @@ export const siteConfig = {
   },
   comments: {
     provider: "giscus",
-    repo: "yourname/yourrepo",
-    repoId: "R_kgDOExample",
+    repo: "legend91019/My_site",
+    repoId: "R_kgDOSPEE8Q",
     category: "General",
-    categoryId: "DIC_kwDOExample4CExample",
+    categoryId: "DIC_kwDOSPEE8c4C77PC",
   },
 } as const;
