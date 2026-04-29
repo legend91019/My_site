@@ -13,10 +13,17 @@
   },
   "dependencies": {
     "@astrojs/mdx": "^5.0.4",
+    "@astrojs/react": "^5.0.4",
     "@astrojs/rss": "^4.0.18",
     "@astrojs/sitemap": "^3.7.2",
+    "@keystatic/astro": "^5.0.6",
+    "@keystatic/core": "^0.5.50",
     "astro": "^6.1.10",
     "pagefind": "^1.4.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0",
     "sharp": "^0.34.3"
   }
 }
