@@ -8,30 +8,43 @@ const allPosts = sortPosts(await getCollection("posts"));
 const featured = allPosts.slice(0, 6);
 ---
 
-<MainLayout title={siteConfig.title} description={siteConfig.description}>
-  <section class="hero card">
-    <h1>{siteConfig.title}</h1>
+<MainLayout title={siteConfig.title} description={siteConfig.description} showSidebar={true}>
+  <!-- Hero 横幅 -->
+  <section class="hero-banner card">
+    <div class="hero-bg-accent"></div>
+    <h1>欢迎来到 {siteConfig.title}</h1>
     <p>{siteConfig.description}</p>
   </section>
-  <section class="posts">
-    <h2>最新文章</h2>
-    <div class="grid">
+
+  <!-- 最新发表的列表 -->
+  <section class="posts-section">
+    <h2 class="section-title">最新发表</h2>
+    <div class="posts-list">
       {
         featured.map((post) => (
-          <article class="card">
-            <h3><a href={`/posts/${post.id}/`}>{post.data.title}</a></h3>
-            <p>{post.data.summary}</p>
-            <p class="meta">
-              <time datetime={post.data.date.toISOString()}>{post.data.date.toLocaleDateString("zh-CN")}</time>
-              <span> · </span>
-              <span>{readingTimeFromText(post.body)} 分钟阅读</span>
-            </p>
-            <div class="chips">
-              {post.data.tags.map((tag) => (
-                <a href={`/tags/${encodeURIComponent(tag)}/`} class="chip">
-                  #{tag}
-                </a>
-              ))}
+          <article class="post-card card interactive" onclick={`location.href='/posts/${post.id}/'`}>
+            <div class="post-header">
+              <span class="post-category-tag">{post.data.category}</span>
+              <time class="post-date" datetime={post.data.date.toISOString()}>
+                {post.data.date.toLocaleDateString("zh-CN", { year: 'numeric', month: 'long', day: 'numeric' })}
+              </time>
+            </div>
+            
+            <h3 class="post-title">
+              <a href={`/posts/${post.id}/`}>{post.data.title}</a>
+            </h3>
+            
+            <p class="post-summary">{post.data.summary}</p>
+            
+            <div class="post-footer">
+              <div class="post-tags">
+                {post.data.tags.map((tag) => (
+                  <a href={`/tags/${encodeURIComponent(tag)}/`} class="tag-link" onclick="event.stopPropagation();">
+                    #{tag}
+                  </a>
+                ))}
+              </div>
+              <span class="read-time">{readingTimeFromText(post.body)} 分钟阅读</span>
             </div>
           </article>
         ))
@@ -41,33 +54,162 @@ const featured = allPosts.slice(0, 6);
 </MainLayout>
 
 <style>
-  .hero {
-    margin-top: 2rem;
+  /* Hero Banner 样式 */
+  .hero-banner {
+    margin-bottom: 2rem;
+    position: relative;
+    overflow: hidden;
+    padding: 2.2rem 2rem;
+    background: linear-gradient(135deg, var(--surface) 60%, var(--accent-soft) 100%);
   }
-  .hero h1 {
-    margin: 0 0 0.5rem;
+
+  .hero-bg-accent {
+    position: absolute;
+    top: -50px;
+    right: -50px;
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    background: var(--accent);
+    filter: blur(80px);
+    opacity: 0.15;
+    pointer-events: none;
   }
-  .posts {
-    margin-top: 2rem;
+  
+  .hero-banner h1 {
+    margin: 0 0 0.6rem;
+    font-size: 2.2rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    background: linear-gradient(to right, var(--text), var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1rem;
-  }
-  .meta {
+  
+  .hero-banner p {
+    margin: 0;
     color: var(--muted);
-    font-size: 0.9rem;
+    font-size: 1.1rem;
+    line-height: 1.6;
   }
-  .chips {
+
+  /* 文章区域标题 */
+  .posts-section {
+    margin-top: 1rem;
+  }
+
+  .section-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .section-title::after {
+    content: "";
+    flex-grow: 1;
+    height: 1px;
+    border-top: 1px dashed var(--line);
+  }
+
+  /* 垂直文章卡片列表 */
+  .posts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .post-card {
+    padding: 1.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .post-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+  }
+
+  .post-category-tag {
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 0.2rem 0.6rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 0.8rem;
+    letter-spacing: 0.02em;
+  }
+
+  .post-date {
+    color: var(--muted);
+  }
+
+  .post-title {
+    margin: 0;
+    font-size: 1.45rem;
+    font-weight: 700;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+
+  .post-title a {
+    color: var(--text);
+  }
+
+  .post-card:hover .post-title a {
+    color: var(--accent);
+  }
+
+  .post-summary {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.96rem;
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .post-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px dashed var(--line);
+    padding-top: 0.85rem;
+    margin-top: 0.3rem;
+  }
+
+  .post-tags {
     display: flex;
     gap: 0.5rem;
     flex-wrap: wrap;
   }
-  .chip {
-    font-size: 0.8rem;
-    border-radius: 999px;
+
+  .tag-link {
+    font-size: 0.82rem;
+    color: var(--muted);
+    background: var(--bg);
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+    transition: all 0.2s;
+  }
+
+  .tag-link:hover {
+    color: var(--accent);
+    border-color: var(--accent);
     background: var(--accent-soft);
-    padding: 0.2rem 0.55rem;
+  }
+
+  .read-time {
+    font-size: 0.82rem;
+    color: var(--muted);
   }
 </style>

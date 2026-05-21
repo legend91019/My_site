@@ -3,17 +3,115 @@ import MainLayout from "../layouts/MainLayout.astro";
 import { siteConfig } from "../config/site";
 ---
 
-<MainLayout title={`搜索 - ${siteConfig.title}`} description="站内全文搜索">
-  <h1>搜索文章</h1>
-  <div id="search" class="card"></div>
+<MainLayout title={`搜索 - ${siteConfig.title}`} description="站内文章与技术知识全文搜索" showSidebar={true}>
+  <!-- Pagefind 样式文件加载 -->
+  <link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
+
+  <section class="search-section">
+    <div class="search-header card">
+      <h1>全文搜索</h1>
+      <p>支持按文章标题、分类、标签或正文关键字进行即时检索，毫秒级响应，助你快速查阅所需要的内容。</p>
+    </div>
+
+    <!-- 搜索挂载点 -->
+    <div id="search" class="card search-card"></div>
+  </section>
+
+  <!-- 搜索组件初始化脚本 -->
   <script is:inline>
-    import("/pagefind/pagefind-ui.js")
-      .then(() => new window.PagefindUI({ element: "#search", showSubResults: true }))
-      .catch(() => {
-        const el = document.querySelector("#search");
-        if (el) {
-          el.innerHTML = "<p>搜索索引尚未生成，请先执行 npm run build。</p>";
-        }
-      });
+    const initPagefind = () => {
+      import("/pagefind/pagefind-ui.js")
+        .then(() => {
+          new window.PagefindUI({
+            element: "#search",
+            showSubResults: true,
+            translations: {
+              placeholder: "输入关键词进行搜索...",
+              clear_search: "清除",
+              load_more: "加载更多结果",
+              search_label: "站内搜索",
+              filters_label: "筛选",
+              zero_results: "没有找到关于 [SEARCH_TERM] 的文章",
+              many_results: "找到 [COUNT] 个关于 [SEARCH_TERM] 的搜索结果",
+              one_result: "找到 1 个关于 [SEARCH_TERM] 的搜索结果",
+              alt_search: "没有找到关于 [SEARCH_TERM] 的文章。正在为您展示类似结果："
+            }
+          });
+        })
+        .catch(() => {
+          const el = document.querySelector("#search");
+          if (el) {
+            el.innerHTML = `
+              <div class="search-error">
+                <p>⚠️ 搜索索引尚未生成。</p>
+                <small>请在本地执行 <code>npm run build</code> 后，再在生成的目标站点中进行测试。</small>
+              </div>
+            `;
+          }
+        });
+    };
+
+    // 适配 Astro 页面切换或直接载入
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", initPagefind);
+    } else {
+      initPagefind();
+    }
   </script>
 </MainLayout>
+
+<style>
+  .search-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  /* 搜索头部 */
+  .search-header {
+    padding: 2rem;
+    background: linear-gradient(135deg, var(--surface) 70%, var(--accent-soft) 100%);
+  }
+
+  .search-header h1 {
+    margin: 0 0 0.5rem;
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+
+  .search-header p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.95rem;
+    line-height: 1.6;
+  }
+
+  /* 搜索框容器 */
+  .search-card {
+    padding: 1.8rem;
+  }
+
+  /* 报错占位 */
+  .search-error {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: var(--muted);
+  }
+
+  .search-error p {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    color: var(--accent);
+  }
+
+  .search-error code {
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 0.15rem 0.35rem;
+    border-radius: 4px;
+    font-family: monospace;
+  }
+</style>

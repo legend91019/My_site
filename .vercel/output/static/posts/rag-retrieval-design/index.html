@@ -1,0 +1,119 @@
+<!DOCTYPE html><html lang="zh-CN"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="icon" href="/favicon.ico"><link rel="sitemap" href="/sitemap-index.xml"><link rel="alternate" type="application/rss+xml" title="天庭" href="https://my-site-ebon-eta.vercel.app/rss.xml"><meta name="generator" content="Astro v6.1.10"><link rel="canonical" href="https://my-site-ebon-eta.vercel.app/posts/rag-retrieval-design/"><title>RAG 检索设计实践：召回、重排与延迟平衡 - 天庭</title><meta name="title" content="RAG 检索设计实践：召回、重排与延迟平衡 - 天庭"><meta name="description" content="以一个问答系统为例，拆解向量召回和重排在效果与成本之间的权衡。"><meta property="og:type" content="website"><meta property="og:url" content="https://my-site-ebon-eta.vercel.app/posts/rag-retrieval-design/"><meta property="og:title" content="RAG 检索设计实践：召回、重排与延迟平衡 - 天庭"><meta property="og:description" content="以一个问答系统为例，拆解向量召回和重排在效果与成本之间的权衡。"><meta property="og:image" content="https://my-site-ebon-eta.vercel.app/og-default.png"><meta property="twitter:card" content="summary_large_image"><meta property="twitter:url" content="https://my-site-ebon-eta.vercel.app/posts/rag-retrieval-design/"><meta property="twitter:title" content="RAG 检索设计实践：召回、重排与延迟平衡 - 天庭"><meta property="twitter:description" content="以一个问答系统为例，拆解向量召回和重排在效果与成本之间的权衡。"><meta property="twitter:image" content="https://my-site-ebon-eta.vercel.app/og-default.png"><meta property="twitter:creator" content="@yourhandle"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css"><link rel="stylesheet" href="/_astro/MainLayout.BBnnx4Qs.css">
+<link rel="stylesheet" href="/_astro/_slug_@_@astro.D5JAlRDz.css"></head> <body> <a class="skip-link" href="#main-content">跳到正文</a> <header class="site-header"> <nav class="container nav"> <a class="brand" href="/">天庭</a> <div class="links"> <a class="nav-link" href="/"> 首页 </a><a class="nav-link" href="/posts"> 文章 </a><a class="nav-link" href="/search"> 搜索 </a><a class="nav-link" href="/about"> 关于 </a> <button id="theme-toggle" class="theme-toggle" aria-label="切换主题">🌓</button> </div> </nav> </header> <main id="main-content" class="container">   <div class="progress" id="reading-progress" data-astro-cid-gysqo7gh></div> <div class="article-layout" data-astro-cid-gysqo7gh> <!-- 1. 左侧目录 (Table of Contents) --> <aside class="toc-sidebar" data-astro-cid-gysqo7gh> <div class="toc-card card" data-astro-cid-gysqo7gh> <h3 class="toc-title" data-astro-cid-gysqo7gh>目录导航</h3> <ul class="toc-list" data-astro-cid-gysqo7gh> <li class="depth-2" data-astro-cid-gysqo7gh> <a href="#召回层" data-astro-cid-gysqo7gh>召回层</a> </li><li class="depth-2" data-astro-cid-gysqo7gh> <a href="#重排层" data-astro-cid-gysqo7gh>重排层</a> </li><li class="depth-2" data-astro-cid-gysqo7gh> <a href="#延迟预算" data-astro-cid-gysqo7gh>延迟预算</a> </li> </ul> </div> </aside> <!-- 2. 中间正文区域 --> <div class="article-main" data-astro-cid-gysqo7gh> <article class="article-card card prose" data-astro-cid-gysqo7gh> <!-- 头部元数据 --> <header class="article-header" data-astro-cid-gysqo7gh> <div class="article-meta" data-astro-cid-gysqo7gh> <a href="/categories/%E5%BA%94%E7%94%A8%E6%9E%B6%E6%9E%84/" class="article-cat" data-astro-cid-gysqo7gh> 应用架构 </a> <span class="meta-dot" data-astro-cid-gysqo7gh>·</span> <time datetime="2026-04-18T00:00:00.000Z" data-astro-cid-gysqo7gh> 2026年4月18日 </time>  <span class="meta-dot" data-astro-cid-gysqo7gh>·</span> <span class="read-duration" data-astro-cid-gysqo7gh>1 分钟阅读</span> </div> <h1 class="article-title" data-astro-cid-gysqo7gh>RAG 检索设计实践：召回、重排与延迟平衡</h1> <!-- 文章操作工具栏 --> <div class="article-toolbar no-print" data-astro-cid-gysqo7gh> <button onclick="window.print()" class="toolbar-btn print-btn" title="一键排版打印 / 导出为 PDF" data-astro-cid-gysqo7gh> <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-astro-cid-gysqo7gh><polyline points="6 9 6 2 18 2 18 9" data-astro-cid-gysqo7gh></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" data-astro-cid-gysqo7gh></path><rect x="6" y="14" width="12" height="8" data-astro-cid-gysqo7gh></rect></svg> <span data-astro-cid-gysqo7gh>打印导出</span> </button> <button id="random-post-btn" class="toolbar-btn" title="随机漫游其他文章" data-astro-cid-gysqo7gh> <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-astro-cid-gysqo7gh><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" data-astro-cid-gysqo7gh></path></svg> <span data-astro-cid-gysqo7gh>随机漫游</span> </button> <button id="share-link-btn" class="toolbar-btn" title="复制文章链接" data-astro-cid-gysqo7gh> <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-astro-cid-gysqo7gh><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" data-astro-cid-gysqo7gh></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" data-astro-cid-gysqo7gh></path></svg> <span id="share-text" data-astro-cid-gysqo7gh>复制链接</span> </button> </div> </header> <!-- 文章主体 HTML 内容 --> <div class="article-body" data-astro-cid-gysqo7gh> <p>RAG 的核心问题不是“能不能召回”，而是“在延迟预算内召回得够不够准”。</p>
+<h2 id="召回层">召回层</h2>
+<p>召回层通常用 ANN。实际工程里建议维护多路索引：</p>
+<ul>
+<li>语义向量索引；</li>
+<li>关键词倒排索引；</li>
+<li>少量高价值文档白名单。</li>
+</ul>
+<h2 id="重排层">重排层</h2>
+<p>重排模型不宜盲目上大模型。多数场景下，轻量 cross-encoder 就能把 top-k 质量拉起来。</p>
+<h2 id="延迟预算">延迟预算</h2>
+<p>先定义整体 SLA，再分配给检索、重排、生成三个阶段，最后反推每层参数。</p> </div> <!-- 学术引用卡片 --> <section class="citation-widget card" data-astro-cid-gysqo7gh> <div class="citation-header" data-astro-cid-gysqo7gh> <h4 data-astro-cid-gysqo7gh>如何引用本文</h4> <button id="copy-bibtex-btn" class="copy-btn" data-astro-cid-gysqo7gh>复制 BibTeX</button> </div> <div class="citation-content" data-astro-cid-gysqo7gh> <div class="citation-format" data-astro-cid-gysqo7gh> <span class="format-label" data-astro-cid-gysqo7gh>GB/T 7714 格式:</span> <p class="format-text" data-astro-cid-gysqo7gh>王勇顺. 《RAG 检索设计实践：召回、重排与延迟平衡》. 天庭, 2026. [Online]. Available: <a href="https://my-site-ebon-eta.vercel.app/posts/rag-retrieval-design/" data-astro-cid-gysqo7gh>https://my-site-ebon-eta.vercel.app/posts/rag-retrieval-design/</a>.</p> </div> <div class="citation-format" data-astro-cid-gysqo7gh> <span class="format-label" data-astro-cid-gysqo7gh>BibTeX 格式:</span> <pre class="bibtex-box" data-astro-cid-gysqo7gh><code id="bibtex-content" data-astro-cid-gysqo7gh>@misc{wang2026ragretrievaldesign,
+  author = {王勇顺},
+  title = {{RAG 检索设计实践：召回、重排与延迟平衡}},
+  year = {2026},
+  howpublished = {\url{https://my-site-ebon-eta.vercel.app/posts/rag-retrieval-design/}},
+  note = {天庭}
+}</code></pre> </div> </div> </section> <!-- 评论区 --> <section class="comments-section no-print" data-astro-cid-gysqo7gh> <h3 class="comments-title" data-astro-cid-gysqo7gh>交流讨论</h3> <div id="giscus-container" data-astro-cid-gysqo7gh> <script src="https://giscus.app/client.js" data-repo="legend91019/My_site" data-repo-id="R_kgDOSPEE8Q" data-category="General" data-category-id="DIC_kwDOSPEE8c4C77PC" data-mapping="pathname" data-strict="0" data-reactions-enabled="1" data-emit-metadata="0" data-input-position="top" data-theme="preferred_color_scheme" data-lang="zh-CN" crossorigin="anonymous" async></script> </div> </section> </article> </div> </div>  <script>(function(){const siblingPostIds = ["embedding-evaluation","llm-training-notes","transformer-math-notes"];
+const bibtexKey = "wang2026ragretrievaldesign";
+const canonicalUrl = "https://my-site-ebon-eta.vercel.app/posts/rag-retrieval-design/";
+
+    // 1. 阅读进度条逻辑
+    const progress = document.getElementById("reading-progress");
+    if (progress) {
+      const updateProgress = () => {
+        const max = document.documentElement.scrollHeight - window.innerHeight;
+        const percent = max <= 0 ? 0 : (window.scrollY / max) * 100;
+        progress.style.width = `${percent}%`;
+      };
+      updateProgress();
+      document.addEventListener("scroll", updateProgress, { passive: true });
+    }
+
+    // 2. 随机漫游逻辑
+    const randomBtn = document.getElementById("random-post-btn");
+    if (randomBtn && siblingPostIds && siblingPostIds.length > 0) {
+      randomBtn.addEventListener("click", () => {
+        const randId = siblingPostIds[Math.floor(Math.random() * siblingPostIds.length)];
+        window.location.href = `/posts/${randId}/`;
+      });
+    }
+
+    // 3. 复制链接逻辑
+    const shareBtn = document.getElementById("share-link-btn");
+    const shareText = document.getElementById("share-text");
+    if (shareBtn && shareText) {
+      shareBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(window.location.href).then(() => {
+          shareText.textContent = "链接已复制!";
+          shareBtn.classList.add("success");
+          setTimeout(() => {
+            shareText.textContent = "复制链接";
+            shareBtn.classList.remove("success");
+          }, 2000);
+        });
+      });
+    }
+
+    // 4. 复制 BibTeX 逻辑
+    const copyBibBtn = document.getElementById("copy-bibtex-btn");
+    const bibContent = document.getElementById("bibtex-content");
+    if (copyBibBtn && bibContent) {
+      copyBibBtn.addEventListener("click", () => {
+        const rawText = bibContent.textContent;
+        navigator.clipboard.writeText(rawText).then(() => {
+          const originalText = copyBibBtn.textContent;
+          copyBibBtn.textContent = "复制成功!";
+          copyBibBtn.classList.add("success");
+          setTimeout(() => {
+            copyBibBtn.textContent = originalText;
+            copyBibBtn.classList.remove("success");
+          }, 2000);
+        });
+      });
+    }
+
+    // 5. Giscus 暗色/明色主题实时监听刷新逻辑
+    const getTheme = () => document.documentElement.dataset.theme || "light";
+    
+    const updateGiscusTheme = () => {
+      const giscusTheme = getTheme() === "dark" ? "dark" : "light";
+      const iframe = document.querySelector("iframe.giscus-frame");
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(
+          { giscus: { setConfig: { theme: giscusTheme } } },
+          "https://giscus.app"
+        );
+      }
+    };
+
+    // 主题切换按钮事件监听器，用于刷新评论区主题
+    const toggleBtn = document.querySelector("#theme-toggle");
+    if (toggleBtn) {
+      toggleBtn.addEventListener("click", () => {
+        // 等待 html 数据集属性在 Layout 脚本中切换完后再修改评论区
+        setTimeout(updateGiscusTheme, 100);
+      });
+    }
+
+    // giscus iframe 加载完成后做一次初始化
+    window.addEventListener("message", (event) => {
+      if (event.origin !== "https://giscus.app") return;
+      if (event.data && typeof event.data === "object" && event.data.giscus) {
+        updateGiscusTheme();
+      }
+    });
+  })();</script>  </main> <footer class="site-footer"> <p>&copy; 2026 Your Name. Built with Astro.</p> <p> <a href="/rss.xml">RSS</a> <span> · </span> <a href="/sitemap-index.xml">Sitemap</a> </p> </footer> <script>
+      const root = document.documentElement;
+      const storedTheme = localStorage.getItem("theme");
+      const initialTheme =
+        storedTheme || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      root.dataset.theme = initialTheme;
+      document.querySelector("#theme-toggle")?.addEventListener("click", () => {
+        const nextTheme = root.dataset.theme === "dark" ? "light" : "dark";
+        root.dataset.theme = nextTheme;
+        localStorage.setItem("theme", nextTheme);
+      });
+    </script> </body> </html>

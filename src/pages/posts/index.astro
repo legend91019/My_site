@@ -2,21 +2,45 @@
 import { getCollection } from "astro:content";
 import MainLayout from "../../layouts/MainLayout.astro";
 import { siteConfig } from "../../config/site";
-import { sortPosts } from "../../utils/posts";
+import { readingTimeFromText, sortPosts } from "../../utils/posts";
 
 const posts = sortPosts(await getCollection("posts"));
 ---
 
-<MainLayout title={`全部文章 - ${siteConfig.title}`} description="全部技术文章列表">
-  <section>
-    <h1>全部文章</h1>
-    <div class="list">
+<MainLayout title={`全部文章 - ${siteConfig.title}`} description="全部技术文章与学习笔记列表" showSidebar={true}>
+  <section class="archive-section">
+    <div class="archive-header card">
+      <h1>全部文章</h1>
+      <p>目前共发布了 <strong>{posts.length}</strong> 篇文章，内容涵盖大语言模型（LLM）、检索增强生成（RAG）、表示学习与模型微调部署。</p>
+    </div>
+    
+    <div class="posts-list">
       {
         posts.map((post) => (
-          <article class="card item">
-            <h2><a href={`/posts/${post.id}/`}>{post.data.title}</a></h2>
-            <p>{post.data.summary}</p>
-            <p class="meta">{post.data.category} · {post.data.date.toLocaleDateString("zh-CN")}</p>
+          <article class="post-card card interactive" onclick={`location.href='/posts/${post.id}/'`}>
+            <div class="post-header">
+              <span class="post-category-tag">{post.data.category}</span>
+              <time class="post-date" datetime={post.data.date.toISOString()}>
+                {post.data.date.toLocaleDateString("zh-CN", { year: 'numeric', month: 'long', day: 'numeric' })}
+              </time>
+            </div>
+            
+            <h2 class="post-title">
+              <a href={`/posts/${post.id}/`}>{post.data.title}</a>
+            </h2>
+            
+            <p class="post-summary">{post.data.summary}</p>
+            
+            <div class="post-footer">
+              <div class="post-tags">
+                {post.data.tags.map((tag) => (
+                  <a href={`/tags/${encodeURIComponent(tag)}/`} class="tag-link" onclick="event.stopPropagation();">
+                    #{tag}
+                  </a>
+                ))}
+              </div>
+              <span class="read-time">{readingTimeFromText(post.body)} 分钟阅读</span>
+            </div>
           </article>
         ))
       }
@@ -25,16 +49,133 @@ const posts = sortPosts(await getCollection("posts"));
 </MainLayout>
 
 <style>
-  .list {
-    display: grid;
-    gap: 1rem;
+  .archive-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
   }
-  .item h2 {
+
+  /* 归档顶部横幅 */
+  .archive-header {
+    padding: 2rem;
+    background: linear-gradient(135deg, var(--surface) 70%, var(--accent-soft) 100%);
+  }
+
+  .archive-header h1 {
+    margin: 0 0 0.5rem;
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+
+  .archive-header p {
     margin: 0;
-    font-size: 1.2rem;
-  }
-  .meta {
     color: var(--muted);
-    font-size: 0.9rem;
+    font-size: 0.98rem;
+    line-height: 1.6;
+  }
+
+  .archive-header strong {
+    color: var(--accent);
+    font-size: 1.1rem;
+  }
+
+  /* 垂直文章卡片列表 */
+  .posts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .post-card {
+    padding: 1.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .post-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+  }
+
+  .post-category-tag {
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 0.2rem 0.6rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 0.8rem;
+    letter-spacing: 0.02em;
+  }
+
+  .post-date {
+    color: var(--muted);
+  }
+
+  .post-title {
+    margin: 0;
+    font-size: 1.45rem;
+    font-weight: 700;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+
+  .post-title a {
+    color: var(--text);
+  }
+
+  .post-card:hover .post-title a {
+    color: var(--accent);
+  }
+
+  .post-summary {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.96rem;
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .post-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px dashed var(--line);
+    padding-top: 0.85rem;
+    margin-top: 0.3rem;
+  }
+
+  .post-tags {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .tag-link {
+    font-size: 0.82rem;
+    color: var(--muted);
+    background: var(--bg);
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+    transition: all 0.2s;
+  }
+
+  .tag-link:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .read-time {
+    font-size: 0.82rem;
+    color: var(--muted);
   }
 </style>

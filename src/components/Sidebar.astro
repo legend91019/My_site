@@ -1,0 +1,384 @@
+---
+import { getCollection } from "astro:content";
+import { siteConfig } from "../config/site";
+import { sortPosts } from "../utils/posts";
+
+// 1. 获取文章集合，过滤并排序
+const allPosts = await getCollection("posts");
+const activePosts = sortPosts(allPosts);
+
+// 2. 获取最近发表的文章 (前 5 篇)
+const recentPosts = activePosts.slice(0, 5);
+
+// 3. 统计各分类文章数
+const categoryCounts = activePosts.reduce((acc, post) => {
+  const cat = post.data.category || "未分类";
+  acc[cat] = (acc[cat] || 0) + 1;
+  return acc;
+}, {} as Record<string, number>);
+
+const categories = Object.entries(categoryCounts).map(([name, count]) => ({
+  name,
+  count,
+}));
+
+// 4. 统计所有标签
+const tags = Array.from(
+  activePosts.reduce((acc, post) => {
+    if (post.data.tags) {
+      post.data.tags.forEach((tag) => acc.add(tag));
+    }
+    return acc;
+  }, new Set<string>())
+);
+
+// 友情链接列表（温馨通道）
+const friendlyLinks = [
+  { label: "科学空间", href: "https://spaces.ac.cn", desc: "苏剑林老师的博客" },
+  { label: "Astro 官网", href: "https://astro.build", desc: "现代全栈前端框架" },
+  { label: "Keystatic CMS", href: "https://keystatic.com", desc: "基于Git的内容管理" },
+  { label: "Pagefind", href: "https://pagefind.app", desc: "零配置静态搜索引擎" }
+];
+---
+
+<div class="sidebar">
+  <!-- 1. 关于站长 -->
+  <section class="widget author-card card">
+    <div class="author-header">
+      <div class="avatar-fallback">WYS</div>
+      <div class="author-info">
+        <h3>{siteConfig.author}</h3>
+        <p class="role">AI 研究者 / 开发者</p>
+      </div>
+    </div>
+    <p class="bio">
+      记录 AI 学习、工程实践以及成长经历。专注于大语言模型（LLM）、检索增强生成（RAG）、知识图谱与模型微调调优。
+    </p>
+    <div class="author-links">
+      <a href={siteConfig.github} target="_blank" rel="noopener noreferrer" title="GitHub" class="social-link">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path><path d="M9 18c-4.51 2-5-2-7-2"></path></svg>
+      </a>
+      <a href="/rss.xml" title="RSS 订阅" class="social-link">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a9 9 0 0 1 9 9"></path><path d="M4 4a16 16 0 0 1 16 16"></path><circle cx="5" cy="19" r="1"></circle></svg>
+      </a>
+    </div>
+  </section>
+
+  <!-- 2. 最近发表 -->
+  <section class="widget card">
+    <h3 class="widget-title">最新发表</h3>
+    <ul class="recent-list">
+      {
+        recentPosts.map((post) => (
+          <li>
+            <a href={`/posts/${post.id}/`} class="recent-item">
+              <span class="recent-title">{post.data.title}</span>
+              <span class="recent-date">{post.data.date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })}</span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
+
+  <!-- 3. 栏目分类 -->
+  <section class="widget card">
+    <h3 class="widget-title">栏目分类</h3>
+    <ul class="category-list">
+      {
+        categories.map((cat) => (
+          <li>
+            <a href={`/categories/${encodeURIComponent(cat.name)}/`} class="category-item">
+              <span class="category-name">{cat.name}</span>
+              <span class="category-count">{cat.count}</span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
+
+  <!-- 4. 热门标签 -->
+  {tags.length > 0 && (
+    <section class="widget card">
+      <h3 class="widget-title">热门标签</h3>
+      <div class="tag-cloud">
+        {
+          tags.map((tag) => (
+            <a href={`/tags/${encodeURIComponent(tag)}/`} class="tag-pill">
+              #{tag}
+            </a>
+          ))
+        }
+      </div>
+    </section>
+  )}
+
+  <!-- 5. 温馨通道 (友情链接) -->
+  <section class="widget card">
+    <h3 class="widget-title">温馨通道</h3>
+    <div class="links-grid">
+      {
+        friendlyLinks.map((link) => (
+          <a href={link.href} target="_blank" rel="noopener noreferrer" class="link-item" title={link.desc}>
+            <span class="link-label">{link.label}</span>
+            <span class="link-arrow">↗</span>
+          </a>
+        ))
+      }
+    </div>
+  </section>
+</div>
+
+<style>
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  
+  .widget {
+    padding: 1.25rem;
+  }
+  
+  .widget-title {
+    margin: 0 0 1rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text);
+    border-left: 3px solid var(--accent);
+    padding-left: 0.6rem;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+  }
+  
+  /* 站长卡片 */
+  .author-card {
+    background: linear-gradient(135deg, var(--surface) 60%, var(--accent-soft) 100%);
+  }
+  
+  .author-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.85rem;
+  }
+  
+  .avatar-fallback {
+    width: 48px;
+    height: 48px;
+    background: linear-gradient(135deg, var(--accent) 0%, #d87d55 100%);
+    border-radius: 50%;
+    color: white;
+    font-weight: 800;
+    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 10px rgba(185, 78, 36, 0.2);
+  }
+  
+  .author-info h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+  
+  .author-info .role {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  
+  .bio {
+    margin: 0 0 1rem;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    color: var(--muted);
+    text-align: justify;
+  }
+  
+  .author-links {
+    display: flex;
+    gap: 0.75rem;
+  }
+  
+  .social-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    background: var(--surface);
+    transition: all 0.2s ease;
+  }
+  
+  .social-link:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    transform: translateY(-2px);
+  }
+
+  /* 最近列表 */
+  .recent-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  
+  .recent-list li {
+    border-bottom: 1px dashed var(--line);
+    padding: 0.6rem 0;
+  }
+  
+  .recent-list li:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+  
+  .recent-list li:first-child {
+    padding-top: 0;
+  }
+  
+  .recent-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 0.9rem;
+    color: var(--text);
+    gap: 0.5rem;
+  }
+  
+  .recent-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    transition: color 0.2s;
+  }
+  
+  .recent-item:hover .recent-title {
+    color: var(--accent);
+  }
+  
+  .recent-date {
+    font-size: 0.8rem;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+
+  /* 分类列表 */
+  .category-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  
+  .category-list li {
+    margin-bottom: 0.55rem;
+  }
+  
+  .category-list li:last-child {
+    margin-bottom: 0;
+  }
+  
+  .category-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.9rem;
+    color: var(--text);
+    padding: 0.35rem 0.6rem;
+    border-radius: var(--radius-sm);
+    transition: all 0.2s;
+  }
+  
+  .category-item:hover {
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding-left: 0.8rem;
+  }
+  
+  .category-count {
+    font-size: 0.78rem;
+    background: var(--line);
+    color: var(--muted);
+    padding: 0.1rem 0.45rem;
+    border-radius: 99px;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+  
+  .category-item:hover .category-count {
+    background: var(--accent);
+    color: white;
+  }
+
+  /* 标签云 */
+  .tag-cloud {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+  
+  .tag-pill {
+    font-size: 0.8rem;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    color: var(--muted);
+    padding: 0.2rem 0.55rem;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+  
+  .tag-pill:hover {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent);
+    transform: scale(1.05);
+  }
+
+  /* 温馨通道 (友情链接) */
+  .links-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+  
+  .link-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    padding: 0.45rem 0.65rem;
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    transition: all 0.2s;
+  }
+  
+  .link-item:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    transform: translateY(-1px);
+  }
+  
+  .link-arrow {
+    font-size: 0.7rem;
+    opacity: 0.7;
+    transition: transform 0.2s;
+  }
+  
+  .link-item:hover .link-arrow {
+    transform: translate(2px, -2px);
+    opacity: 1;
+  }
+</style>

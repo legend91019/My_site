@@ -2,6 +2,7 @@
 import { getCollection, render } from "astro:content";
 import MainLayout from "../../layouts/MainLayout.astro";
 import { siteConfig } from "../../config/site";
+import { readingTimeFromText } from "../../utils/posts";
 
 export async function getStaticPaths() {
   const posts = await getCollection("posts", ({ data }) => !data.draft);
@@ -12,52 +13,148 @@ const { post } = Astro.props;
 const { Content, headings } = await render(post);
 const description = post.data.summary;
 const tocHeadings = headings.filter((heading) => heading.depth <= 3);
+
+// 获取所有文章 ID，用于客户端随机推荐功能
+const allPosts = await getCollection("posts", ({ data }) => !data.draft);
+const siblingPostIds = allPosts.map((p) => p.id).filter((id) => id !== post.id);
+
+// 格式化引用年份
+const publishYear = post.data.date ? new Date(post.data.date).getFullYear() : new Date().getFullYear();
+const bibtexKey = `wang${publishYear}${post.id.replace(/[^a-zA-Z0-9]/g, "")}`;
+const canonicalUrl = `${siteConfig.siteUrl}posts/${post.id}/`;
 ---
 
 <MainLayout title={`${post.data.title} - ${siteConfig.title}`} description={description}>
+  <!-- 阅读进度条 -->
   <div class="progress" id="reading-progress"></div>
-  <article class="article-wrap">
-    <aside class="toc card">
-      <h2>目录</h2>
-      <ul>
+
+  <div class="article-layout">
+    <!-- 1. 左侧目录 (Table of Contents) -->
+    <aside class="toc-sidebar">
+      <div class="toc-card card">
+        <h3 class="toc-title">目录导航</h3>
         {
-          tocHeadings.map((heading) => (
-            <li class={`depth-${heading.depth}`}>
-              <a href={`#${heading.slug}`}>{heading.text}</a>
-            </li>
-          ))
+          tocHeadings.length > 0 ? (
+            <ul class="toc-list">
+              {tocHeadings.map((heading) => (
+                <li class={`depth-${heading.depth}`}>
+                  <a href={`#${heading.slug}`}>{heading.text}</a>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p class="toc-empty">本文无需目录</p>
+          )
         }
-      </ul>
+      </div>
     </aside>
-    <div class="prose card article">
-      <h1>{post.data.title}</h1>
-      <p class="meta">
-        <a href={`/categories/${encodeURIComponent(post.data.category)}/`}>{post.data.category}</a> ·
-        <time datetime={post.data.date.toISOString()}> {post.data.date.toLocaleDateString("zh-CN")}</time>
-      </p>
-      <Content />
-      <section class="comments">
-        <h2>评论</h2>
-        <script
-          src="https://giscus.app/client.js"
-          data-repo={siteConfig.comments.repo}
-          data-repo-id={siteConfig.comments.repoId}
-          data-category={siteConfig.comments.category}
-          data-category-id={siteConfig.comments.categoryId}
-          data-mapping="pathname"
-          data-strict="0"
-          data-reactions-enabled="1"
-          data-emit-metadata="0"
-          data-input-position="top"
-          data-theme="preferred_color_scheme"
-          data-lang="zh-CN"
-          crossorigin="anonymous"
-          async
-        ></script>
-      </section>
+
+    <!-- 2. 中间正文区域 -->
+    <div class="article-main">
+      <article class="article-card card prose">
+        <!-- 头部元数据 -->
+        <header class="article-header">
+          <div class="article-meta">
+            <a href={`/categories/${encodeURIComponent(post.data.category)}/`} class="article-cat">
+              {post.data.category}
+            </a>
+            <span class="meta-dot">·</span>
+            <time datetime={post.data.date.toISOString()}>
+              {post.data.date.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}
+            </time>
+            {post.data.updated && (
+              <>
+                <span class="meta-dot">·</span>
+                <span class="updated-date" title="最后更新时间">
+                  已更新于 {post.data.updated.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })}
+                </span>
+              </>
+            )}
+            <span class="meta-dot">·</span>
+            <span class="read-duration">{readingTimeFromText(post.body)} 分钟阅读</span>
+          </div>
+          
+          <h1 class="article-title">{post.data.title}</h1>
+
+          <!-- 文章操作工具栏 -->
+          <div class="article-toolbar no-print">
+            <button onclick="window.print()" class="toolbar-btn print-btn" title="一键排版打印 / 导出为 PDF">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+              <span>打印导出</span>
+            </button>
+
+            {siblingPostIds.length > 0 && (
+              <button id="random-post-btn" class="toolbar-btn" title="随机漫游其他文章">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                <span>随机漫游</span>
+              </button>
+            )}
+
+            <button id="share-link-btn" class="toolbar-btn" title="复制文章链接">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+              <span id="share-text">复制链接</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- 文章主体 HTML 内容 -->
+        <div class="article-body">
+          <Content />
+        </div>
+
+        <!-- 学术引用卡片 -->
+        <section class="citation-widget card">
+          <div class="citation-header">
+            <h4>如何引用本文</h4>
+            <button id="copy-bibtex-btn" class="copy-btn">复制 BibTeX</button>
+          </div>
+          <div class="citation-content">
+            <div class="citation-format">
+              <span class="format-label">GB/T 7714 格式:</span>
+              <p class="format-text">{siteConfig.author}. 《{post.data.title}》. {siteConfig.title}, {publishYear}. [Online]. Available: <a href={canonicalUrl}>{canonicalUrl}</a>.</p>
+            </div>
+            <div class="citation-format">
+              <span class="format-label">BibTeX 格式:</span>
+              <pre class="bibtex-box"><code id="bibtex-content">{`@misc{${bibtexKey},
+  author = {${siteConfig.author}},
+  title = {{${post.data.title}}},
+  year = {${publishYear}},
+  howpublished = {\\url{${canonicalUrl}}},
+  note = {${siteConfig.title}}
+}`}</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- 评论区 -->
+        <section class="comments-section no-print">
+          <h3 class="comments-title">交流讨论</h3>
+          <div id="giscus-container">
+            <script
+              src="https://giscus.app/client.js"
+              data-repo={siteConfig.comments.repo}
+              data-repo-id={siteConfig.comments.repoId}
+              data-category={siteConfig.comments.category}
+              data-category-id={siteConfig.comments.categoryId}
+              data-mapping="pathname"
+              data-strict="0"
+              data-reactions-enabled="1"
+              data-emit-metadata="0"
+              data-input-position="top"
+              data-theme="preferred_color_scheme"
+              data-lang="zh-CN"
+              crossorigin="anonymous"
+              async
+            ></script>
+          </div>
+        </section>
+      </article>
     </div>
-  </article>
-  <script is:inline>
+  </div>
+
+  <!-- 客户端交互脚本 -->
+  <script is:inline define:vars={{ siblingPostIds, bibtexKey, canonicalUrl }}>
+    // 1. 阅读进度条逻辑
     const progress = document.getElementById("reading-progress");
     if (progress) {
       const updateProgress = () => {
@@ -68,10 +165,94 @@ const tocHeadings = headings.filter((heading) => heading.depth <= 3);
       updateProgress();
       document.addEventListener("scroll", updateProgress, { passive: true });
     }
+
+    // 2. 随机漫游逻辑
+    const randomBtn = document.getElementById("random-post-btn");
+    if (randomBtn && siblingPostIds && siblingPostIds.length > 0) {
+      randomBtn.addEventListener("click", () => {
+        const randId = siblingPostIds[Math.floor(Math.random() * siblingPostIds.length)];
+        window.location.href = `/posts/${randId}/`;
+      });
+    }
+
+    // 3. 复制链接逻辑
+    const shareBtn = document.getElementById("share-link-btn");
+    const shareText = document.getElementById("share-text");
+    if (shareBtn && shareText) {
+      shareBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(window.location.href).then(() => {
+          shareText.textContent = "链接已复制!";
+          shareBtn.classList.add("success");
+          setTimeout(() => {
+            shareText.textContent = "复制链接";
+            shareBtn.classList.remove("success");
+          }, 2000);
+        });
+      });
+    }
+
+    // 4. 复制 BibTeX 逻辑
+    const copyBibBtn = document.getElementById("copy-bibtex-btn");
+    const bibContent = document.getElementById("bibtex-content");
+    if (copyBibBtn && bibContent) {
+      copyBibBtn.addEventListener("click", () => {
+        const rawText = bibContent.textContent;
+        navigator.clipboard.writeText(rawText).then(() => {
+          const originalText = copyBibBtn.textContent;
+          copyBibBtn.textContent = "复制成功!";
+          copyBibBtn.classList.add("success");
+          setTimeout(() => {
+            copyBibBtn.textContent = originalText;
+            copyBibBtn.classList.remove("success");
+          }, 2000);
+        });
+      });
+    }
+
+    // 5. Giscus 暗色/明色主题实时监听刷新逻辑
+    const getTheme = () => document.documentElement.dataset.theme || "light";
+    
+    const updateGiscusTheme = () => {
+      const giscusTheme = getTheme() === "dark" ? "dark" : "light";
+      const iframe = document.querySelector("iframe.giscus-frame");
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(
+          { giscus: { setConfig: { theme: giscusTheme } } },
+          "https://giscus.app"
+        );
+      }
+    };
+
+    // 主题切换按钮事件监听器，用于刷新评论区主题
+    const toggleBtn = document.querySelector("#theme-toggle");
+    if (toggleBtn) {
+      toggleBtn.addEventListener("click", () => {
+        // 等待 html 数据集属性在 Layout 脚本中切换完后再修改评论区
+        setTimeout(updateGiscusTheme, 100);
+      });
+    }
+
+    // giscus iframe 加载完成后做一次初始化
+    window.addEventListener("message", (event) => {
+      if (event.origin !== "https://giscus.app") return;
+      if (event.data && typeof event.data === "object" && event.data.giscus) {
+        updateGiscusTheme();
+      }
+    });
   </script>
 </MainLayout>
 
 <style>
+  /* 页面核心布局（左目录右内容） */
+  .article-layout {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 2rem;
+    margin-top: 2rem;
+    align-items: start;
+  }
+
+  /* 顶部全局进度条 */
   .progress {
     position: fixed;
     top: 0;
@@ -79,35 +260,267 @@ const tocHeadings = headings.filter((heading) => heading.depth <= 3);
     height: 3px;
     width: 0;
     background: var(--accent);
-    z-index: 999;
+    z-index: 1000;
+    transition: width 0.1s ease-out;
   }
-  .article-wrap {
-    display: grid;
-    grid-template-columns: 280px minmax(0, 1fr);
-    gap: 1rem;
-    margin-top: 1.5rem;
-  }
-  .toc {
+
+  /* 左侧目录栏 */
+  .toc-sidebar {
     position: sticky;
-    top: 84px;
-    height: fit-content;
+    top: 90px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    scrollbar-width: none; /* Firefox */
   }
-  .toc ul {
+
+  .toc-sidebar::-webkit-scrollbar {
+    display: none; /* Chrome/Safari */
+  }
+
+  .toc-card {
+    padding: 1.25rem;
+  }
+
+  .toc-title {
+    margin: 0 0 0.85rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.5rem;
+  }
+
+  .toc-list {
+    list-style: none;
+    padding: 0;
     margin: 0;
+  }
+
+  .toc-list li {
+    margin-bottom: 0.5rem;
+  }
+
+  .toc-list a {
+    color: var(--muted);
+    font-size: 0.88rem;
+    transition: all 0.2s;
+    display: block;
+    line-height: 1.4;
+  }
+
+  .toc-list a:hover {
+    color: var(--accent);
+    padding-left: 0.2rem;
+  }
+
+  .toc-list li.depth-3 {
     padding-left: 1rem;
   }
-  .meta {
+
+  .toc-empty {
+    margin: 0;
+    font-size: 0.85rem;
     color: var(--muted);
   }
-  .article {
-    padding: 2rem;
+
+  /* 右侧文章主容器 */
+  .article-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
   }
+
+  .article-card {
+    padding: 2.5rem;
+  }
+
+  .article-header {
+    border-bottom: 1px dashed var(--line);
+    padding-bottom: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .article-meta {
+    font-size: 0.85rem;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: "Inter", sans-serif;
+  }
+
+  .article-cat {
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 0.15rem 0.55rem;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+
+  .meta-dot {
+    opacity: 0.7;
+  }
+
+  .article-title {
+    margin: 0.8rem 0 1.2rem;
+    font-size: 2.3rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.3;
+  }
+
+  /* 操作工具栏 */
+  .article-toolbar {
+    display: flex;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+  }
+
+  .toolbar-btn {
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--muted);
+    border-radius: 30px;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.82rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: "Inter", sans-serif;
+  }
+
+  .toolbar-btn svg {
+    opacity: 0.8;
+  }
+
+  .toolbar-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    transform: translateY(-1px);
+  }
+
+  .toolbar-btn.success {
+    background: #10b981;
+    color: white;
+    border-color: #10b981;
+  }
+
+  /* 学术引用卡片 */
+  .citation-widget {
+    margin-top: 3.5rem;
+    padding: 1.5rem;
+    background: color-mix(in srgb, var(--line) 15%, var(--surface));
+    border-radius: var(--radius-md);
+  }
+
+  .citation-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.6rem;
+    margin-bottom: 1rem;
+  }
+
+  .citation-header h4 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .copy-btn {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    color: var(--muted);
+    padding: 0.25rem 0.65rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+
+  .copy-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .copy-btn.success {
+    background: #10b981;
+    color: white;
+    border-color: #10b981;
+  }
+
+  .citation-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .citation-format {
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+
+  .format-label {
+    font-weight: 700;
+    color: var(--text);
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  .format-text {
+    margin: 0;
+    color: var(--muted);
+  }
+
+  .bibtex-box {
+    margin: 0.4rem 0 0 !important;
+    padding: 0.6rem !important;
+    border-radius: var(--radius-sm) !important;
+    font-size: 0.8rem !important;
+    max-height: 150px;
+    overflow-y: auto;
+  }
+
+  /* 评论区 */
+  .comments-section {
+    margin-top: 3rem;
+    border-top: 1px solid var(--line);
+    padding-top: 2rem;
+  }
+
+  .comments-title {
+    margin: 0 0 1.5rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+
+  /* 响应式调整 */
   @media (max-width: 960px) {
-    .article-wrap {
+    .article-layout {
       grid-template-columns: 1fr;
+      gap: 1.5rem;
     }
-    .toc {
+    
+    .toc-sidebar {
       position: static;
+      max-height: none;
+    }
+
+    .article-card {
+      padding: 1.5rem;
+    }
+
+    .article-title {
+      font-size: 1.8rem;
     }
   }
 </style>
