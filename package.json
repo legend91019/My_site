@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build && pagefind --site dist",
+    "build": "astro build && pagefind --site dist/client && node scripts/sync-pagefind.mjs",
     "preview": "astro preview",
     "astro": "astro"
   },

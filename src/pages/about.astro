@@ -1,16 +1,215 @@
 ---
 import MainLayout from "../layouts/MainLayout.astro";
 import { siteConfig } from "../config/site";
+
+const focusAreas = [
+  "大模型训练与推理优化",
+  "RAG 检索链路与知识库设计",
+  "中文技术写作与长期知识沉淀",
+];
+
+const principles = [
+  "尽量把原理讲清，再谈工程取舍。",
+  "优先记录可以复用的实验、脚手架和踩坑结论。",
+  "写给未来的自己，也写给正在做类似事情的人。",
+];
 ---
 
 <MainLayout title={`关于 - ${siteConfig.title}`} description="关于作者与博客">
-  <article class="card prose">
-    <h1>关于我</h1>
-    <p>这里是一个偏研究与工程落地的技术博客，长期记录 NLP、LLM、检索增强与训练调优相关内容。</p>
-    <p>如果你也在做中文大模型、文本表示学习或模型部署优化，欢迎交流。</p>
-    <p>
-      GitHub:
-      <a href={siteConfig.github} target="_blank" rel="noreferrer">{siteConfig.github}</a>
-    </p>
-  </article>
+  <section class="about-shell">
+    <article class="about-hero card">
+      <div class="about-main">
+        <p class="eyebrow">About The Author</p>
+        <h1>关于我</h1>
+        <p class="about-lead">
+          这里是一个偏研究与工程落地的技术博客，长期记录 NLP、LLM、检索增强与训练调优相关内容。
+        </p>
+        <p class="about-copy">
+          我希望这个站点不仅是文章集合，更像一个持续增长的个人知识库。每篇内容都尽量服务于后续复用：
+          要么帮助我把问题想清楚，要么帮助后来者少走弯路。
+        </p>
+      </div>
+
+      <aside class="about-aside">
+        <div class="about-badge">{siteConfig.title.slice(0, 1)}</div>
+        <h2>{siteConfig.author}</h2>
+        <p>AI 学习 · 工程实践 · 长期写作</p>
+        <a href={siteConfig.github} target="_blank" rel="noreferrer" class="about-link">
+          访问 GitHub
+        </a>
+      </aside>
+    </article>
+
+    <section class="about-grid">
+      <article class="about-panel card">
+        <h2>当前关注</h2>
+        <ul class="about-list">
+          {focusAreas.map((item) => <li>{item}</li>)}
+        </ul>
+      </article>
+
+      <article class="about-panel card">
+        <h2>写作原则</h2>
+        <ul class="about-list">
+          {principles.map((item) => <li>{item}</li>)}
+        </ul>
+      </article>
+    </section>
+
+    <article class="about-contact card">
+      <h2>联系与交流</h2>
+      <p>
+        如果你也在做中文大模型、文本表示学习、RAG 系统设计或者模型部署优化，欢迎交流。
+      </p>
+      <p>
+        GitHub：
+        <a href={siteConfig.github} target="_blank" rel="noreferrer">{siteConfig.github}</a>
+      </p>
+    </article>
+  </section>
 </MainLayout>
+
+<style>
+  .about-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    max-width: 980px;
+    margin: 0 auto;
+  }
+
+  .about-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) 280px;
+    gap: 1.25rem;
+    padding: 1.8rem;
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--surface-strong) 92%, transparent) 0%, var(--surface) 100%);
+  }
+
+  .about-main h1 {
+    margin: 0.7rem 0 0.9rem;
+    font-family: "Source Serif 4", "Noto Serif SC", serif;
+    font-size: clamp(2.2rem, 4vw, 3rem);
+    line-height: 1.05;
+    letter-spacing: -0.04em;
+  }
+
+  .about-lead {
+    margin: 0;
+    color: var(--text);
+    font-size: 1.04rem;
+    line-height: 1.8;
+  }
+
+  .about-copy {
+    margin: 1rem 0 0;
+    color: var(--muted);
+    line-height: 1.8;
+  }
+
+  .about-aside {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.55rem;
+    padding: 1.2rem;
+    border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--accent-soft) 62%, var(--surface-strong));
+  }
+
+  .about-badge {
+    width: 3rem;
+    height: 3rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.95rem;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+    color: #fff7ef;
+    font-family: "Source Serif 4", "Noto Serif SC", serif;
+    font-size: 1.35rem;
+    font-weight: 700;
+  }
+
+  .about-aside h2 {
+    margin: 0.15rem 0 0;
+    font-size: 1.15rem;
+  }
+
+  .about-aside p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.7;
+  }
+
+  .about-link {
+    align-self: flex-start;
+    margin-top: 0.4rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.55rem 0.9rem;
+    color: var(--text);
+    background: var(--surface-strong);
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  .about-link:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .about-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
+  .about-panel,
+  .about-contact {
+    padding: 1.35rem 1.45rem;
+  }
+
+  .about-panel h2,
+  .about-contact h2 {
+    margin: 0 0 0.9rem;
+    font-size: 1.15rem;
+    font-weight: 700;
+  }
+
+  .about-list {
+    margin: 0;
+    padding-left: 1.3rem;
+    color: var(--muted);
+    line-height: 1.8;
+  }
+
+  .about-list li + li {
+    margin-top: 0.45rem;
+  }
+
+  .about-contact p {
+    margin: 0.5rem 0 0;
+    color: var(--muted);
+    line-height: 1.8;
+  }
+
+  @media (max-width: 900px) {
+    .about-hero,
+    .about-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .about-hero,
+    .about-panel,
+    .about-contact {
+      padding: 1.2rem;
+    }
+  }
+</style>
