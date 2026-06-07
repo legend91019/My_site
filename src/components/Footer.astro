@@ -1,12 +1,22 @@
 ---
+import { siteConfig } from "../config/site";
+
 const today = new Date();
 ---
 
 <footer class="site-footer">
-  <p>&copy; {today.getFullYear()} Your Name. Built with Astro.</p>
-  <p>
-    <a href="/rss.xml">RSS</a>
-    <span> · </span>
-    <a href="/sitemap-index.xml">Sitemap</a>
-  </p>
+  <div class="container footer-inner">
+    <p class="footer-title">{siteConfig.title}</p>
+    <p>由 {siteConfig.author} 持续维护，记录 AI 学习、工程实践与长期写作。</p>
+    <p>
+      <a href="/posts/">文章归档</a>
+      <span> · </span>
+      <a href="/search">站内搜索</a>
+      <span> · </span>
+      <a href="/rss.xml">RSS</a>
+      <span> · </span>
+      <a href="/sitemap-index.xml">Sitemap</a>
+    </p>
+    <p>&copy; {today.getFullYear()} {siteConfig.author}. Built with Astro.</p>
+  </div>
 </footer>

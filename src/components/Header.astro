@@ -4,7 +4,13 @@ import { siteConfig } from "../config/site";
 
 <header class="site-header">
   <nav class="container nav">
-    <a class="brand" href="/">{siteConfig.title}</a>
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">{siteConfig.title.slice(0, 1)}</span>
+      <span class="brand-copy">
+        <span class="brand-title">{siteConfig.title}</span>
+        <span class="brand-subtitle">AI 学习与工程写作</span>
+      </span>
+    </a>
     <div class="links">
       {
         siteConfig.nav.map((item) => (
@@ -13,7 +19,9 @@ import { siteConfig } from "../config/site";
           </a>
         ))
       }
-      <button id="theme-toggle" class="theme-toggle" aria-label="切换主题">🌓</button>
+      <button id="theme-toggle" class="theme-toggle" aria-label="切换明暗主题">
+        <span aria-hidden="true">◐</span>
+      </button>
     </div>
   </nav>
 </header>

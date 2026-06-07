@@ -7,11 +7,10 @@ category: "项目总结"
 draft: false
 ---
 
-<div class="definition">
-项目地址: https://github.com/legend91019/Your-Desktop-dialogue-robot
-</div>
+> 项目地址：
+> [Your-Desktop-dialogue-robot](https://github.com/legend91019/Your-Desktop-dialogue-robot)
 
-![架构图](./images/xinbao_framework.png)
+![芯宝系统架构图](./images/xinbao_framework.png)
 
 ## 项目总体架构
 

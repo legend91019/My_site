@@ -6,210 +6,541 @@ import { readingTimeFromText, sortPosts } from "../utils/posts";
 
 const allPosts = sortPosts(await getCollection("posts"));
 const featured = allPosts.slice(0, 6);
+const [leadPost, ...secondaryPosts] = featured;
+
+const categoryCounts = allPosts.reduce((acc, post) => {
+  const category = post.data.category || "未分类";
+  acc[category] = (acc[category] || 0) + 1;
+  return acc;
+}, {} as Record<string, number>);
+
+const topCategories = Object.entries(categoryCounts)
+  .sort(([, leftCount], [, rightCount]) => rightCount - leftCount)
+  .slice(0, 4)
+  .map(([name, count]) => ({
+    name,
+    count,
+    description: describeCategory(name),
+  }));
+
+const years = Array.from(new Set(allPosts.map((post) => post.data.date.getFullYear()))).sort((a, b) => b - a);
+const tagCount = allPosts.reduce((acc, post) => {
+  post.data.tags?.forEach((tag) => acc.add(tag));
+  return acc;
+}, new Set<string>()).size;
+
+const latestPost = allPosts[0];
+const siteStats = [
+  { label: "文章", value: `${allPosts.length}` },
+  { label: "专题", value: `${Object.keys(categoryCounts).length}` },
+  { label: "标签", value: `${tagCount}` },
+  { label: "年份", value: years.length > 0 ? `${years[0]} - ${years.at(-1)}` : "持续更新" },
+];
+
+function describeCategory(name: string) {
+  if (/LLM|大模型|语言模型/i.test(name)) return "围绕训练、推理、评测与应用落地做长期整理。";
+  if (/RAG|检索/i.test(name)) return "记录检索增强、知识库构建与召回链路设计。";
+  if (/训练|微调|优化/i.test(name)) return "聚焦模型训练、数据配比与工程优化细节。";
+  if (/数学|理论|算法/i.test(name)) return "把原理推导、关键公式与算法直觉讲清楚。";
+  return "持续沉淀相关问题、方法和真实工程经验。";
+}
 ---
 
 <MainLayout title={siteConfig.title} description={siteConfig.description} showSidebar={true}>
-  <!-- Hero 横幅 -->
-  <section class="hero-banner card">
-    <div class="hero-bg-accent"></div>
-    <h1>欢迎来到 {siteConfig.title}</h1>
-    <p>{siteConfig.description}</p>
+  <section class="home-hero card">
+    <div class="hero-main">
+      <p class="eyebrow">Long-form Writing For AI Research</p>
+      <h1>{siteConfig.title}</h1>
+      <p class="hero-summary">{siteConfig.description}</p>
+      <div class="hero-actions">
+        <a href="/posts/" class="hero-link primary">进入文章归档</a>
+        <a href="/search/" class="hero-link">检索全站内容</a>
+      </div>
+    </div>
+
+    <div class="hero-note">
+      <p class="hero-note-title">本站关注</p>
+      <ul class="hero-note-list">
+        {topCategories.map((category) => <li>{category.name}</li>)}
+      </ul>
+      {latestPost && (
+        <p class="hero-note-foot">
+          最近更新于
+          <strong>
+            {latestPost.data.date.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}
+          </strong>
+        </p>
+      )}
+    </div>
   </section>
 
-  <!-- 最新发表的列表 -->
-  <section class="posts-section">
-    <h2 class="section-title">最新发表</h2>
-    <div class="posts-list">
-      {
-        featured.map((post) => (
-          <article class="post-card card interactive" onclick={`location.href='/posts/${post.id}/'`}>
-            <div class="post-header">
-              <span class="post-category-tag">{post.data.category}</span>
-              <time class="post-date" datetime={post.data.date.toISOString()}>
-                {post.data.date.toLocaleDateString("zh-CN", { year: 'numeric', month: 'long', day: 'numeric' })}
-              </time>
-            </div>
-            
-            <h3 class="post-title">
-              <a href={`/posts/${post.id}/`}>{post.data.title}</a>
-            </h3>
-            
-            <p class="post-summary">{post.data.summary}</p>
-            
-            <div class="post-footer">
-              <div class="post-tags">
-                {post.data.tags.map((tag) => (
-                  <a href={`/tags/${encodeURIComponent(tag)}/`} class="tag-link" onclick="event.stopPropagation();">
-                    #{tag}
-                  </a>
-                ))}
-              </div>
-              <span class="read-time">{readingTimeFromText(post.body)} 分钟阅读</span>
-            </div>
-          </article>
-        ))
-      }
+  <section class="stats-grid" aria-label="站点统计">
+    {
+      siteStats.map((stat) => (
+        <div class="stat-card card">
+          <span class="stat-label">{stat.label}</span>
+          <strong class="stat-value">{stat.value}</strong>
+        </div>
+      ))
+    }
+  </section>
+
+  {topCategories.length > 0 && (
+    <section class="focus-section card">
+      <div class="section-heading">
+        <div>
+          <h2>专题导览</h2>
+          <p>把常写的方向提前摆出来，读者一进站就知道这里主要在研究什么。</p>
+        </div>
+      </div>
+
+      <div class="focus-grid">
+        {
+          topCategories.map((category) => (
+            <a href={`/categories/${encodeURIComponent(category.name)}/`} class="focus-card">
+              <span class="focus-name">{category.name}</span>
+              <span class="focus-meta">{category.count} 篇文章</span>
+              <p>{category.description}</p>
+            </a>
+          ))
+        }
+      </div>
+    </section>
+  )}
+
+  <section class="feed-section">
+    <div class="section-heading">
+      <div>
+        <h2>最近更新</h2>
+        <p>首页保持内容优先，用一篇主文和一组摘要列表来承接读者视线。</p>
+      </div>
+      <a class="section-link" href="/posts/">查看全部文章</a>
     </div>
+
+    <div class="feed-layout">
+      {leadPost && (
+        <article class="lead-post card interactive" onclick={`location.href='/posts/${leadPost.id}/'`}>
+          <div class="lead-meta">
+            <span>{leadPost.data.category}</span>
+            <span>·</span>
+            <time datetime={leadPost.data.date.toISOString()}>
+              {leadPost.data.date.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}
+            </time>
+            <span>·</span>
+            <span>{readingTimeFromText(leadPost.body)} 分钟阅读</span>
+          </div>
+
+          <h3 class="lead-title">
+            <a href={`/posts/${leadPost.id}/`}>{leadPost.data.title}</a>
+          </h3>
+
+          <p class="lead-summary">{leadPost.data.summary}</p>
+
+          <div class="lead-tags">
+            {leadPost.data.tags.map((tag) => <span class="post-pill">#{tag}</span>)}
+          </div>
+        </article>
+      )}
+
+      <div class="feed-list">
+        {
+          secondaryPosts.map((post) => (
+            <article class="feed-item card interactive" onclick={`location.href='/posts/${post.id}/'`}>
+              <div class="feed-date">
+                <span class="feed-day">{post.data.date.toLocaleDateString("zh-CN", { day: "2-digit" })}</span>
+                <span class="feed-month">{post.data.date.toLocaleDateString("zh-CN", { month: "short" })}</span>
+              </div>
+
+              <div class="feed-copy">
+                <div class="feed-meta">
+                  <span>{post.data.category}</span>
+                  <span>·</span>
+                  <span>{readingTimeFromText(post.body)} 分钟</span>
+                </div>
+                <h3 class="feed-title">
+                  <a href={`/posts/${post.id}/`}>{post.data.title}</a>
+                </h3>
+                <p class="feed-summary">{post.data.summary}</p>
+              </div>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="archive-callout card">
+    <p class="archive-callout-label">写作说明</p>
+    <p class="archive-callout-text">
+      这里优先发布可复用的学习笔记、工程复盘和技术拆解，尽量让每篇文章都能成为后续工作的索引节点。
+    </p>
   </section>
 </MainLayout>
 
 <style>
-  /* Hero Banner 样式 */
-  .hero-banner {
-    margin-bottom: 2rem;
-    position: relative;
+  .home-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(240px, 0.8fr);
+    gap: 1.5rem;
+    padding: 2rem;
+    margin-bottom: 1rem;
     overflow: hidden;
-    padding: 2.2rem 2rem;
-    background: linear-gradient(135deg, var(--surface) 60%, var(--accent-soft) 100%);
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--surface-strong) 92%, transparent) 0%, var(--surface) 100%);
   }
 
-  .hero-bg-accent {
-    position: absolute;
-    top: -50px;
-    right: -50px;
-    width: 150px;
-    height: 150px;
-    border-radius: 50%;
-    background: var(--accent);
-    filter: blur(80px);
-    opacity: 0.15;
-    pointer-events: none;
+  .hero-main h1 {
+    margin: 0.7rem 0 0.9rem;
+    font-family: "Source Serif 4", "Noto Serif SC", serif;
+    font-size: clamp(2.3rem, 4vw, 3.3rem);
+    line-height: 1.05;
+    letter-spacing: -0.04em;
   }
-  
-  .hero-banner h1 {
-    margin: 0 0 0.6rem;
-    font-size: 2.2rem;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    background: linear-gradient(to right, var(--text), var(--accent));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
-  
-  .hero-banner p {
+
+  .hero-summary {
+    max-width: 44rem;
     margin: 0;
     color: var(--muted);
-    font-size: 1.1rem;
-    line-height: 1.6;
+    font-size: 1.02rem;
   }
 
-  /* 文章区域标题 */
-  .posts-section {
-    margin-top: 1rem;
-  }
-
-  .section-title {
-    font-size: 1.25rem;
-    font-weight: 700;
-    margin-bottom: 1.5rem;
-    color: var(--text);
+  .hero-actions {
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 1.4rem;
   }
 
-  .section-title::after {
-    content: "";
-    flex-grow: 1;
-    height: 1px;
-    border-top: 1px dashed var(--line);
+  .hero-link {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.62rem 1rem;
+    color: var(--text);
+    background: var(--surface-strong);
+    font-size: 0.92rem;
+    font-weight: 600;
   }
 
-  /* 垂直文章卡片列表 */
-  .posts-list {
+  .hero-link.primary {
+    color: #fff7ef;
+    border-color: var(--accent);
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  }
+
+  .hero-note {
+    border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
+    border-radius: calc(var(--radius-lg) - 4px);
+    padding: 1.2rem 1.1rem;
+    background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface-strong));
+  }
+
+  .hero-note-title {
+    margin: 0 0 0.8rem;
+    color: var(--accent-strong);
+    font-size: 0.84rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .hero-note-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 0.6rem;
   }
 
-  .post-card {
-    padding: 1.6rem;
+  .hero-note-list li {
+    padding-bottom: 0.6rem;
+    border-bottom: 1px dashed color-mix(in srgb, var(--line) 88%, transparent);
+    font-weight: 600;
+  }
+
+  .hero-note-list li:last-child {
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+
+  .hero-note-foot {
+    margin: 1rem 0 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  .hero-note-foot strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.9rem;
+    margin-bottom: 1.4rem;
+  }
+
+  .stat-card {
+    padding: 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .stat-label {
+    color: var(--muted);
+    font-size: 0.82rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .stat-value {
+    font-family: "Source Serif 4", "Noto Serif SC", serif;
+    font-size: 1.45rem;
+    line-height: 1.1;
+  }
+
+  .focus-section {
+    padding: 1.5rem;
+    margin-bottom: 1.75rem;
+  }
+
+  .focus-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.9rem;
+  }
+
+  .focus-card {
+    border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
+    color: inherit;
+  }
+
+  .focus-card:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface-strong));
+  }
+
+  .focus-name {
+    display: block;
+    margin-bottom: 0.18rem;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .focus-meta {
+    display: block;
+    margin-bottom: 0.55rem;
+    color: var(--accent);
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+
+  .focus-card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.65;
+  }
+
+  .feed-section {
+    margin-top: 0.2rem;
+  }
+
+  .section-link {
+    color: var(--muted);
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  .feed-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+    gap: 1rem;
+  }
+
+  .lead-post {
+    padding: 1.7rem;
+    min-height: 100%;
+  }
+
+  .lead-meta,
+  .feed-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--muted);
+    font-size: 0.84rem;
+  }
+
+  .lead-title,
+  .feed-title {
+    margin: 0.7rem 0 0.75rem;
+    line-height: 1.32;
+  }
+
+  .lead-title {
+    font-family: "Source Serif 4", "Noto Serif SC", serif;
+    font-size: 1.95rem;
+    letter-spacing: -0.03em;
+  }
+
+  .feed-title {
+    font-size: 1.08rem;
+  }
+
+  .lead-title a,
+  .feed-title a {
+    color: var(--text);
+  }
+
+  .lead-post:hover .lead-title a,
+  .feed-item:hover .feed-title a {
+    color: var(--accent);
+  }
+
+  .lead-summary,
+  .feed-summary {
+    margin: 0;
+    color: var(--muted);
+  }
+
+  .lead-summary {
+    font-size: 1rem;
+    line-height: 1.75;
+  }
+
+  .lead-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1.35rem;
+  }
+
+  .post-pill {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.18rem 0.55rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+    background: var(--surface-strong);
+  }
+
+  .feed-list {
     display: flex;
     flex-direction: column;
     gap: 0.85rem;
   }
 
-  .post-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 0.85rem;
+  .feed-item {
+    display: grid;
+    grid-template-columns: 74px minmax(0, 1fr);
+    gap: 1rem;
+    align-items: start;
+    padding: 1.1rem;
   }
 
-  .post-category-tag {
-    color: var(--accent);
-    background: var(--accent-soft);
-    padding: 0.2rem 0.6rem;
-    border-radius: var(--radius-sm);
-    font-weight: 600;
+  .feed-date {
+    padding-top: 0.15rem;
+    text-align: center;
+    border-right: 1px dashed color-mix(in srgb, var(--line) 90%, transparent);
+  }
+
+  .feed-day {
+    display: block;
+    font-family: "Source Serif 4", "Noto Serif SC", serif;
+    font-size: 1.55rem;
+    line-height: 1;
+  }
+
+  .feed-month {
+    display: block;
+    margin-top: 0.28rem;
+    color: var(--muted);
     font-size: 0.8rem;
-    letter-spacing: 0.02em;
   }
 
-  .post-date {
-    color: var(--muted);
-  }
-
-  .post-title {
-    margin: 0;
-    font-size: 1.45rem;
-    font-weight: 700;
-    line-height: 1.35;
-    letter-spacing: -0.01em;
-  }
-
-  .post-title a {
-    color: var(--text);
-  }
-
-  .post-card:hover .post-title a {
-    color: var(--accent);
-  }
-
-  .post-summary {
-    margin: 0;
-    color: var(--muted);
-    font-size: 0.96rem;
-    line-height: 1.6;
+  .feed-summary {
+    font-size: 0.92rem;
+    line-height: 1.7;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
 
-  .post-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-top: 1px dashed var(--line);
-    padding-top: 0.85rem;
-    margin-top: 0.3rem;
+  .archive-callout {
+    margin-top: 1.4rem;
+    padding: 1.25rem 1.4rem;
+    background: color-mix(in srgb, var(--surface-strong) 88%, var(--accent-soft));
   }
 
-  .post-tags {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-
-  .tag-link {
-    font-size: 0.82rem;
-    color: var(--muted);
-    background: var(--bg);
-    padding: 0.15rem 0.5rem;
-    border-radius: 4px;
-    border: 1px solid var(--line);
-    transition: all 0.2s;
-  }
-
-  .tag-link:hover {
+  .archive-callout-label {
+    margin: 0 0 0.35rem;
     color: var(--accent);
-    border-color: var(--accent);
-    background: var(--accent-soft);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
-  .read-time {
-    font-size: 0.82rem;
+  .archive-callout-text {
+    margin: 0;
     color: var(--muted);
+    line-height: 1.7;
+  }
+
+  @media (max-width: 1080px) {
+    .stats-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .feed-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .home-hero,
+    .focus-grid,
+    .stats-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .home-hero,
+    .focus-section,
+    .lead-post,
+    .archive-callout {
+      padding: 1.3rem;
+    }
+
+    .feed-item {
+      grid-template-columns: 1fr;
+      gap: 0.7rem;
+    }
+
+    .feed-date {
+      display: flex;
+      align-items: baseline;
+      justify-content: flex-start;
+      gap: 0.5rem;
+      border-right: none;
+      border-bottom: 1px dashed color-mix(in srgb, var(--line) 90%, transparent);
+      padding-bottom: 0.6rem;
+    }
+
+    .feed-day,
+    .feed-month {
+      display: inline;
+    }
+
+    .feed-day {
+      font-size: 1.1rem;
+    }
   }
 </style>

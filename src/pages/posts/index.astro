@@ -5,41 +5,65 @@ import { siteConfig } from "../../config/site";
 import { readingTimeFromText, sortPosts } from "../../utils/posts";
 
 const posts = sortPosts(await getCollection("posts"));
+const categoryCount = new Set(posts.map((post) => post.data.category || "未分类")).size;
+const tagCount = posts.reduce((acc, post) => {
+  post.data.tags?.forEach((tag) => acc.add(tag));
+  return acc;
+}, new Set<string>()).size;
 ---
 
 <MainLayout title={`全部文章 - ${siteConfig.title}`} description="全部技术文章与学习笔记列表" showSidebar={true}>
-  <section class="archive-section">
+  <section class="archive-shell">
     <div class="archive-header card">
+      <p class="eyebrow">Archive</p>
       <h1>全部文章</h1>
-      <p>目前共发布了 <strong>{posts.length}</strong> 篇文章，内容涵盖大语言模型（LLM）、检索增强生成（RAG）、表示学习与模型微调部署。</p>
+      <p class="archive-intro">
+        这里收纳完整的写作时间线。相比首页，这一页更像目录页，方便按标题、摘要和标签快速扫读。
+      </p>
+
+      <div class="archive-stats">
+        <div>
+          <span>文章</span>
+          <strong>{posts.length}</strong>
+        </div>
+        <div>
+          <span>专题</span>
+          <strong>{categoryCount}</strong>
+        </div>
+        <div>
+          <span>标签</span>
+          <strong>{tagCount}</strong>
+        </div>
+      </div>
     </div>
-    
-    <div class="posts-list">
+
+    <div class="archive-list">
       {
         posts.map((post) => (
-          <article class="post-card card interactive" onclick={`location.href='/posts/${post.id}/'`}>
-            <div class="post-header">
-              <span class="post-category-tag">{post.data.category}</span>
-              <time class="post-date" datetime={post.data.date.toISOString()}>
-                {post.data.date.toLocaleDateString("zh-CN", { year: 'numeric', month: 'long', day: 'numeric' })}
-              </time>
+          <article class="archive-item card interactive" onclick={`location.href='/posts/${post.id}/'`}>
+            <div class="archive-date">
+              <span class="archive-year">{post.data.date.getFullYear()}</span>
+              <span class="archive-day">
+                {post.data.date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })}
+              </span>
             </div>
-            
-            <h2 class="post-title">
-              <a href={`/posts/${post.id}/`}>{post.data.title}</a>
-            </h2>
-            
-            <p class="post-summary">{post.data.summary}</p>
-            
-            <div class="post-footer">
-              <div class="post-tags">
-                {post.data.tags.map((tag) => (
-                  <a href={`/tags/${encodeURIComponent(tag)}/`} class="tag-link" onclick="event.stopPropagation();">
-                    #{tag}
-                  </a>
-                ))}
+
+            <div class="archive-copy">
+              <div class="archive-meta">
+                <span>{post.data.category}</span>
+                <span>·</span>
+                <span>{readingTimeFromText(post.body)} 分钟阅读</span>
               </div>
-              <span class="read-time">{readingTimeFromText(post.body)} 分钟阅读</span>
+
+              <h2 class="archive-title">
+                <a href={`/posts/${post.id}/`}>{post.data.title}</a>
+              </h2>
+
+              <p class="archive-summary">{post.data.summary}</p>
+
+              <div class="archive-tags">
+                {post.data.tags.map((tag) => <span class="archive-tag">#{tag}</span>)}
+              </div>
             </div>
           </article>
         ))
@@ -49,133 +73,166 @@ const posts = sortPosts(await getCollection("posts"));
 </MainLayout>
 
 <style>
-  .archive-section {
+  .archive-shell {
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    gap: 1.1rem;
   }
 
-  /* 归档顶部横幅 */
   .archive-header {
-    padding: 2rem;
-    background: linear-gradient(135deg, var(--surface) 70%, var(--accent-soft) 100%);
+    padding: 1.8rem;
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--surface-strong) 92%, transparent) 0%, var(--surface) 100%);
   }
 
   .archive-header h1 {
-    margin: 0 0 0.5rem;
-    font-size: 2rem;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    color: var(--text);
+    margin: 0.75rem 0 0.65rem;
+    font-family: "Source Serif 4", "Noto Serif SC", serif;
+    font-size: clamp(2rem, 3vw, 2.7rem);
+    letter-spacing: -0.03em;
+    line-height: 1.05;
   }
 
-  .archive-header p {
+  .archive-intro {
+    max-width: 48rem;
     margin: 0;
     color: var(--muted);
-    font-size: 0.98rem;
-    line-height: 1.6;
   }
 
-  .archive-header strong {
-    color: var(--accent);
-    font-size: 1.1rem;
+  .archive-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.9rem;
+    margin-top: 1.3rem;
   }
 
-  /* 垂直文章卡片列表 */
-  .posts-list {
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
+  .archive-stats div {
+    border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
+    border-radius: var(--radius-md);
+    padding: 0.9rem 1rem;
+    background: color-mix(in srgb, var(--surface-strong) 90%, transparent);
   }
 
-  .post-card {
-    padding: 1.6rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.85rem;
-  }
-
-  .post-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 0.85rem;
-  }
-
-  .post-category-tag {
-    color: var(--accent);
-    background: var(--accent-soft);
-    padding: 0.2rem 0.6rem;
-    border-radius: var(--radius-sm);
-    font-weight: 600;
+  .archive-stats span {
+    display: block;
+    color: var(--muted);
     font-size: 0.8rem;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
-  .post-date {
-    color: var(--muted);
-  }
-
-  .post-title {
-    margin: 0;
+  .archive-stats strong {
+    display: block;
+    margin-top: 0.3rem;
+    font-family: "Source Serif 4", "Noto Serif SC", serif;
     font-size: 1.45rem;
-    font-weight: 700;
-    line-height: 1.35;
-    letter-spacing: -0.01em;
   }
 
-  .post-title a {
+  .archive-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.95rem;
+  }
+
+  .archive-item {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr);
+    gap: 1.15rem;
+    padding: 1.25rem;
+  }
+
+  .archive-date {
+    border-right: 1px dashed color-mix(in srgb, var(--line) 90%, transparent);
+    text-align: center;
+    padding-right: 0.9rem;
+  }
+
+  .archive-year {
+    display: block;
+    color: var(--accent);
+    font-size: 0.84rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
+
+  .archive-day {
+    display: block;
+    margin-top: 0.32rem;
+    font-family: "Source Serif 4", "Noto Serif SC", serif;
+    font-size: 1.3rem;
+    font-weight: 700;
+  }
+
+  .archive-meta {
+    display: flex;
+    gap: 0.45rem;
+    align-items: center;
+    color: var(--muted);
+    font-size: 0.84rem;
+  }
+
+  .archive-title {
+    margin: 0.65rem 0 0.6rem;
+    font-size: 1.28rem;
+    line-height: 1.35;
+  }
+
+  .archive-title a {
     color: var(--text);
   }
 
-  .post-card:hover .post-title a {
+  .archive-item:hover .archive-title a {
     color: var(--accent);
   }
 
-  .post-summary {
+  .archive-summary {
     margin: 0;
     color: var(--muted);
-    font-size: 0.96rem;
-    line-height: 1.6;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    line-height: 1.7;
   }
 
-  .post-footer {
+  .archive-tags {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-top: 1px dashed var(--line);
-    padding-top: 0.85rem;
-    margin-top: 0.3rem;
-  }
-
-  .post-tags {
-    display: flex;
-    gap: 0.5rem;
     flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 1rem;
   }
 
-  .tag-link {
-    font-size: 0.82rem;
+  .archive-tag {
+    border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
+    border-radius: 999px;
+    padding: 0.16rem 0.55rem;
     color: var(--muted);
-    background: var(--bg);
-    padding: 0.15rem 0.5rem;
-    border-radius: 4px;
-    border: 1px solid var(--line);
-    transition: all 0.2s;
+    font-size: 0.78rem;
+    background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
   }
 
-  .tag-link:hover {
-    color: var(--accent);
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
+  @media (max-width: 720px) {
+    .archive-header,
+    .archive-item {
+      padding: 1.2rem;
+    }
 
-  .read-time {
-    font-size: 0.82rem;
-    color: var(--muted);
+    .archive-stats,
+    .archive-item {
+      grid-template-columns: 1fr;
+    }
+
+    .archive-date {
+      border-right: none;
+      border-bottom: 1px dashed color-mix(in srgb, var(--line) 90%, transparent);
+      padding-right: 0;
+      padding-bottom: 0.75rem;
+      text-align: left;
+    }
+
+    .archive-year,
+    .archive-day {
+      display: inline;
+    }
+
+    .archive-day {
+      margin-left: 0.55rem;
+    }
   }
 </style>
