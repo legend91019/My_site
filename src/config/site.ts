@@ -1,7 +1,7 @@
 export const siteConfig = {
   title: "天庭",
   description: "记录王勇顺的AI学习,工程实践,以及各种经历。",
-  siteUrl: "https://my-site-ebon-eta.vercel.app/",
+  siteUrl: "https://tiantingnote.com/",
   author: "王勇顺",
   github: "https://github.com/legend91019/My_site",
   nav: [
