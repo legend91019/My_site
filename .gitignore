@@ -5,6 +5,10 @@ dist/
 # vercel
 .vercel/
 
+# local deployment scratch files
+.deploy/
+.deploy_deps/
+
 # dependencies
 node_modules/
 
