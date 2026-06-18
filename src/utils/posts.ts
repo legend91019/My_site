@@ -6,8 +6,9 @@ export function sortPosts(posts: CollectionEntry<"posts">[]) {
     .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
 }
 
-export function readingTimeFromText(text: string) {
+export function readingTimeFromText(text?: string) {
   const wordsPerMinute = 260;
-  const words = text.trim().split(/\s+/u).filter(Boolean).length;
+  const safeText = text ?? "";
+  const words = safeText.trim().split(/\s+/u).filter(Boolean).length;
   return Math.max(1, Math.ceil(words / wordsPerMinute));
 }
