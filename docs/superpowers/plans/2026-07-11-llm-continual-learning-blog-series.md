@@ -83,7 +83,7 @@ Run `npm run build`. Expected: Astro exits with code 0 and emits the new post ro
 ### Task 3: Build the Recent-Paper Evidence Matrix
 
 **Files:**
-- Read: official papers for C-LoRA, OA-Adapter, OLieRA, and ELLA
+- Read: official papers for Sculpting Subspaces, OA-Adapter, OLieRA, and ELLA
 - Read: `D:/Desktop/Research/On the Instability of Orthogonal LoRA in Continual Learning3.pdf`
 - Temporary: local extracted paper text outside `src/content/posts/`
 
@@ -97,7 +97,7 @@ Download their official arXiv PDFs and extract layout-preserving text.
 
 - [ ] **Step 2: Extract all five method definitions**
 
-Capture routing and orthogonality for C-LoRA, dynamic bottleneck budgeting for OA-Adapter, Lie-group multiplicative adaptation for OLieRA, selective subspace de-correlation for ELLA, and BOD/SFOR/WRP/Mature SFOR for the author's paper.
+Capture adaptive-SVD constraints for Sculpting Subspaces, dynamic bottleneck budgeting for OA-Adapter, Lie-group multiplicative adaptation for OLieRA, selective subspace de-correlation for ELLA, and BOD/SFOR/WRP/Mature SFOR for the author's paper.
 
 - [ ] **Step 3: Extract experiment cards**
 
@@ -125,7 +125,7 @@ Use a Chinese title and summary, date `2026-07-11`, tags for `大模型`, `持�
 
 Define `W = W_0 + BA`, explain basis versus routing interpretations, and state why linear orthogonality arguments are not automatically sufficient for a bilinear parameterization.
 
-- [ ] **Step 3: Write the C-LoRA, OA-Adapter, OLieRA, and ELLA profiles**
+- [ ] **Step 3: Write the Sculpting Subspaces, OA-Adapter, OLieRA, and ELLA profiles**
 
 For each profile, include its core equation, method intuition, training flow, experiments, baselines, model choice, results, and a transition question leading to the next paper.
 
@@ -139,7 +139,7 @@ Compare replay, parameter growth, task-ID dependence, constraint target, geometr
 
 - [ ] **Step 6: Add references and critical conclusions**
 
-Link all five papers and briefly position Sculpting Subspaces, DOC, and SLICE as nearby work. End with open questions rather than claiming the field is solved.
+Link all five papers and briefly position C-LoRA, DOC, and SLICE as nearby work. End with open questions rather than claiming the field is solved.
 
 ### Task 5: Verify and Clean the Series
 

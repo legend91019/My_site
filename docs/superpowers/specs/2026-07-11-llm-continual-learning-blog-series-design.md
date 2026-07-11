@@ -40,19 +40,19 @@ Working title: `正交 LoRA 真能防止遗忘吗：从子空间复用到双线�
 
 Use five papers to form a single research progression:
 
-1. C-LoRA: single-LoRA routing, subspace reuse, and orthogonality.
+1. Sculpting Subspaces: adaptive SVD and orthogonal constraints for continual full fine-tuning.
 2. OA-Adapter: adaptive parameter budgets across tasks and layers.
 3. OLieRA: multiplicative low-rank updates on Lie groups and parameter geometry.
 4. ELLA: selective subspace de-correlation and the plasticity cost of strict orthogonality.
 5. The author's SFOR paper: BOD, WRP, Scaling Buffer Effect, strict versus mature SFOR, and safe basis expansion.
 
-For each paper, include method equations, optimization intuition, datasets, models, baselines, metrics, major results, and critical limitations. Mention Sculpting Subspaces, DOC, and SLICE as related comparisons without turning them into full paper profiles.
+For each paper, include method equations, optimization intuition, datasets, models, baselines, metrics, major results, and critical limitations. Mention C-LoRA, DOC, and SLICE as related comparisons without turning them into full paper profiles.
 
 ### Narrative
 
 The article moves through five questions:
 
-1. Can one shared LoRA reuse knowledge without one adapter per task?
+1. Can orthogonal subspaces protect old knowledge without adding task-specific parameters?
 2. How much orthogonal capacity should each task and layer receive?
 3. Does additive adaptation preserve the geometry of model parameters?
 4. Does strict orthogonality destroy useful transfer and exhaust plasticity?
