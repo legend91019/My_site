@@ -364,7 +364,7 @@ L_{\phi}^{KL}
 D_{KL}
 \left(
 p_j(V|[P,\tilde X_i],\phi_0,\theta)
-\ \|\ 
+\;\|\;
 p_j(V|[P,\tilde X_i],\phi,\theta)
 \right)
 $$
@@ -730,4 +730,3 @@ O-LoRA 的关键是：
 + Progressive Prompts: Continual Learning for Language Models, arXiv:2301.12314, https://arxiv.org/abs/2301.12314
 + Orthogonal Subspace Learning for Language Model Continual Learning, ACL 2023 Anthology / O-LoRA, https://aclanthology.org/2023.findings-emnlp.715/
 + LoRA: Low-Rank Adaptation of Large Language Models, arXiv:2106.09685, https://arxiv.org/abs/2106.09685
-

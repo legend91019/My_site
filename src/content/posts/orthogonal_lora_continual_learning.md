@@ -136,7 +136,7 @@ OA-Adapter 接的是另一个现实问题：固定 rank 很粗糙。不同任务
 $$
 y=x+W_2f(W_1x+b_1)+b_2,
 \quad
-W_1\in\mathbb{R}^{r\times d},\ 
+W_1\in\mathbb{R}^{r\times d},\quad
 W_2\in\mathbb{R}^{d\times r}.
 $$
 
@@ -249,7 +249,7 @@ OLieRA 把视角从“空间分配”推到“参数几何”。它认为 O-LoRA
 
 $$
 W+\Delta W=W+BA,\quad
-B\in\mathbb{R}^{d\times r},\ 
+B\in\mathbb{R}^{d\times r},\quad
 A\in\mathbb{R}^{r\times k}.
 $$
 
@@ -368,7 +368,7 @@ LoRA 更新：
 
 $$
 \Delta W=AB,\quad
-A\in\mathbb{R}^{d\times r},\ 
+A\in\mathbb{R}^{d\times r},\quad
 B\in\mathbb{R}^{r\times k}.
 $$
 
