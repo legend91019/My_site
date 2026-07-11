@@ -33,7 +33,7 @@ draft: false
 
 > 每层权重的高奇异值方向更像旧知识和高曲率方向；新任务更新应该尽量走到这些方向的正交补里。
 
-这和 O-LoRA 的差异很明显：O-LoRA 在低秩 LoRA 子空间里隔离任务；Sculpting Subspaces 直接对全模型权重做 SVD，然后投影梯度。
+这和 O-LoRA 的差异很明显：O-LoRA 在低秩 LoRA 子空间里隔离任务；Sculpting Subspaces 直接对全模型权重做 SVD，然后投影梯度。它不是 gradient replay；但层重要性 $I^{(l)}$ 这一项需要在任务边界拿到上一任务样本，或者提前缓存好的统计量，所以它的隐私和存储假设要比“纯梯度投影”更重一点。
 
 ### 核心公式
 
@@ -56,6 +56,8 @@ $$
 I^{(l)}=\frac{1}{N}\sum_{i=1}^{N}\cos(X_i^{(l)},Y_i^{(l)}),
 \quad Y_i^{(l)}=W^{(l)}X_i^{(l)}.
 $$
+
+所以它虽然不把旧样本混进新任务的梯度训练，并不等于完全不依赖历史数据。任务切换时仍要访问上一任务样本来计算 $I^{(l)}$，或者提前缓存足够的层统计量；这项存储与隐私假设需要单独记账。
 
 然后把 $I^{(l)}$ 归一化，并决定每层保留比例：
 
@@ -486,14 +488,20 @@ $$
 
 ### Taylor 假设为什么会坏掉？
 
-旧任务损失的 Taylor 展开：
+旧任务损失的 Taylor 展开需要先把矩阵更新向量化。令
+
+$$
+\delta w=\operatorname{vec}(\Delta W),
+$$
+
+则维度一致的写法是：
 
 $$
 \Delta L_{\text{old}}
 \approx
-\nabla_{\text{old}}^\top\Delta W
-+\frac{1}{2}\Delta W^\top H_{\text{old}}\Delta W
-+O(\|\Delta W\|^3).
+\nabla_{w}L_{\text{old}}^\top\delta w
++\frac{1}{2}\delta w^\top H_{\text{old}}\delta w
++O(\|\delta w\|^3).
 $$
 
 传统正交论证常依赖两个假设：
@@ -633,13 +641,12 @@ $B$ 侧的直觉仍然有意义，但也应写成假设：即便 weight decay �
 $$
 k_{\text{var}}^{(l)}
 =
-\arg\min_k
-\left(
+\min\left\{k:
 \frac{\sum_{i=1}^{k}\sigma_i^2}
 {\sum_{i=1}^{r}\sigma_i^2}
 \ge
 \tau_{\text{var}}
-\right).
+\right\}.
 $$
 
 再 clamp：
@@ -758,7 +765,7 @@ SFOR 的 replay 条件很干净：不 replay。base SFOR 严格零参数增长�
 |---|---|---|---|---|---|
 | 更新对象 | 全参数 projected fine-tuning | Adapter modules | 每任务 LoRA + 乘性更新 | LoRA + 聚合能量正则 | 冻结 basis 的 LoRA routing + WRP |
 | 主要问题 | 全参表达力与少遗忘 | 动态预算与正交 | 参数几何与正交 | 选择性去相关 | 双线性优化逃逸 |
-| replay | 无 | 主方法无 | 无 | 主方法无 | 无 |
+| replay | 不参与梯度 replay；任务边界需上一任务样本或缓存统计量 | 主方法无 | 无 | 主方法无 | 无 |
 | 参数增长 | 固定 | task-specific adapter 管理，预算更省 | 每任务 LoRA 增长 | 无架构扩展，维护聚合矩阵 | base 零增长，Mature 有界增长 |
 | 推理 task ID | 不依赖 | 声称不需显式 task ID | 继承 O-LoRA | 不依赖 | 不依赖 |
 | 代表模型 | T5-Large / LLaMA-2 7B | T5-large / Llama-7B | T5-large / LLaMA-7B | T5-Large / LLaMA3.1-8B | LLaMA-2-7B / Qwen-2.5-3B |
