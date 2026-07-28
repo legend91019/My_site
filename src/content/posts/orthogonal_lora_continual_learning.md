@@ -1,6 +1,6 @@
 ---
 title: "正交 LoRA 真能防止遗忘吗：从子空间复用到双线性优化失稳"
-summary: "顺着五篇近期工作，理解正交子空间方法从全参投影、预算分配、乘性几何到双线性失稳的关键假设。"
+summary: "顺着多篇近期工作，理解正交 LoRA 持续学习从子空间隔离、参数不碰撞、梯度投影、合并式更新到双线性失稳的关键假设。"
 date: 2026-07-11
 tags: ["大模型","持续学习","LoRA","正交子空间"]
 category: "论文解读"
@@ -13,13 +13,18 @@ draft: false
 
 > 正交到底是在保护知识，还是在消耗模型未来可学习的空间？
 
-这篇不是再讲持续学习入门。默认读者已经知道 Transformer，也已经读过上一篇里关于 replay、prompt、LoRA 和 O-LoRA 的基本铺垫。我会按一个研究链条深读五篇论文：
+这篇不是再讲持续学习入门。默认读者已经知道 Transformer，也已经读过上一篇里关于 replay、prompt、LoRA 和 O-LoRA 的基本铺垫。我会把最近读的论文分成两层来讲：第一层是“正交 LoRA 之后大家到底在修什么”，第二层是“这些修法背后共同暴露了什么假设”。
+
+主线论文包括：
 
 1. **Sculpting Subspaces**：如果不做 LoRA，而是全参数微调，能不能把更新投到旧知识的正交补里？
 2. **OA-Adapter**：如果每层、每个任务复杂度不同，正交空间预算该不该自适应？
 3. **OLieRA**：如果 LoRA 的加性更新破坏参数几何，乘性更新会不会更自然？
-4. **ELLA**：如果严格正交会阻断迁移，能不能只去相关高能历史方向？
-5. **SFOR/BOD 作者稿**：如果 LoRA 本身是双线性参数化，只约束一个因子会不会让优化器从另一个因子逃逸？
+4. **N-LoRA / GORP / PS-LoRA / SLAO**：如果 O-LoRA 不够稳，问题到底在参数碰撞、梯度冲突、符号翻转，还是合并策略？
+5. **ELLA**：如果严格正交会阻断迁移，能不能只去相关高能历史方向？
+6. **SFOR/BOD 作者稿**：如果 LoRA 本身是双线性参数化，只约束一个因子会不会让优化器从另一个因子逃逸？
+
+旁支里还会顺带放进 **InfLoRA** 和 **KeepLoRA**：它们都属于“固定 LoRA 两个矩阵之一，只训练另一个”的路线，和 O-LoRA 这类“两个矩阵都训练，但对子空间加约束”的方法正好形成对照。
 
 先把公平性警告放在前面：这些论文的数据集、backbone、是否 replay、是否参数增长、是否 task-ID-free、指标定义都不完全一致。后面的数字只能在各自实验协议里理解，不能直接排成“谁第一谁第二”的总榜。
 
@@ -350,9 +355,230 @@ Taylor 阶数消融里，一阶、二阶、三阶差距很小：比如 Order 1 �
 
 限制也在这里。Hadamard Abelian Lie group 是否真实刻画 LLM 参数几何，并没有被彻底证明；长序列相对 N-LoRA 的提升很小；超参仍可能受任务顺序影响；而且它没有报告 TRACE。
 
-过渡到第四问：如果严格正交不总是好，能不能只保护历史高能方向，把低能方向留给迁移？
+过渡到第四问：在 O-LoRA 之后，很多工作其实都在问同一个问题：如果“正交”这个词太粗，那么真正该控制的对象是什么？
 
-## 四、ELLA：能不能只去相关高能历史方向？
+## 四、O-LoRA 后的 baseline 演化：从参数碰撞到梯度空间，再到合并策略
+
+这一节专门放几篇更像“标准 baseline 参考系”的论文。它们和前面的 OA-Adapter、OLieRA 不完全一样：不是只问“如何更正交”，而是在拆 O-LoRA 的失效来源。
+
+我会先给一句总图：
+
+```text
+O-LoRA：不同任务 LoRA 子空间正交
+→ N-LoRA：正交还不够，同一参数位置不要碰撞
+→ GORP：参数正交还不够，梯度更新方向要动态投影
+→ PS-LoRA：梯度方向还不够，逐元素更新幅度和符号翻转也要管
+→ SLAO：多任务 LoRA 存储/推理太重，能不能正交初始化后持续合并
+```
+
+### N-LoRA：正交不等于不碰撞
+
+N-LoRA 的动机很锋利：两个任务的更新矩阵即使整体内积为 0，也不代表它们没有在同一个参数位置上互相覆盖。
+
+举一个最小例子。两个向量：
+
+$$
+u=(1,1),\quad v=(1,-1).
+$$
+
+它们满足 $u^\top v=0$，所以是正交的。但第一个坐标和第二个坐标都同时被两个任务使用了，只是正负抵消后内积为 0。N-LoRA 说：这种“抵消式正交”不够安全，因为参数位置已经发生 collision。
+
+论文把两个更新矩阵 $\Delta W_i,\Delta W_j$ 的 non-collision 定义成：
+
+$$
+\forall(a,b),\quad
+\Delta W_i[a,b]=0\ \text{or}\ \Delta W_j[a,b]=0.
+$$
+
+也就是说，同一个矩阵位置最多只能被一个任务显著使用。它进一步指出：
+
+$$
+\text{non-collision}\Rightarrow \Delta W_i^\top\Delta W_j=0,
+$$
+
+但反过来不成立。正交只要求乘积求和为 0；non-collision 要求每一个位置都不同时非零，所以更强。
+
+N-LoRA 的实现非常朴素。对每个任务的 LoRA 更新：
+
+$$
+\Delta W_i=A_iB_i,
+$$
+
+加一个 $\ell_1$ 稀疏项：
+
+$$
+L=L_{\text{task}}+\lambda\|\Delta W_i\|_1.
+$$
+
+注意这里不是分别稀疏 $A_i$ 或 $B_i$，而是稀疏真实更新 $\Delta W_i=A_iB_i$。这点很重要，因为 LoRA 的真实作用对象不是单独某个因子，而是二者乘积。
+
+实验设置上，N-LoRA 主要沿用 O-LoRA 的 T5-large standard CL 与 15-task long sequence：Standard 三个 order 实际常见为 DBpedia、Amazon、Yahoo、AG News 的四任务排列；Long 是 GLUE、SuperGLUE、IMDB 与分类任务组成的 15-task 序列。T5-large 上 Standard 使用 learning rate `1e-3`、batch size `32`、dropout `0.1`、weight decay `0`、训练 `10` epochs，稀疏超参 $\lambda=0.4$；Long 的不同 order 调整学习率和 $\lambda$。
+
+关键表格是：
+
+| 方法 | T5 Standard avg | T5 Long avg | LLaMA-7B avg |
+|---|---:|---:|---:|
+| O-LoRA | `75.8` | `69.6` | `76.1` |
+| N-LoRA | `78.8` | `72.4` | `77.6` |
+
+此外，正交性表里 N-LoRA 的 OO 从 O-LoRA 的 `26.38` 降到 `6.47`，AWOM 从 `55.96` 降到 `0.14`。这张表最值得记：**N-LoRA 没有直接追着 O-LoRA 的正交损失走，反而得到更好的正交指标**。这说明“减少 collision”可能比“只优化子空间内积”更接近防遗忘的真实目标。
+
+它的限制也清楚：极长任务序列下，稀疏空间迟早会被用满；并且 $\ell_1$ 稀疏带来的 non-collision 是软性的，不是严格分配参数坐标。
+
+### GORP：不只看参数，还要看梯度
+
+GORP 往前又走了一步。它认为 O-LoRA、N-LoRA、MIGU 这类方法主要在参数上做显式约束，但连续学习里的冲突往往首先出现在梯度方向上。于是 GORP 的核心对象不是 $\Delta W$，而是梯度共享空间。
+
+它用 Adam 的一阶动量来近似一个任务的整体梯度方向。对第 $t$ 个任务、第 $l$ 层的一阶动量 $M_t^l$ 做 SVD：
+
+$$
+M_t^l=U_t^l\Sigma_t^l(V_t^l)^\top.
+$$
+
+取前 $k$ 个方向组成当前任务的梯度子空间，并追加到历史 shared gradient space $S$ 中。新任务训练时，把梯度投影到历史空间的正交部分：
+
+$$
+P_{t,l}
+=G'_{t,l}-S_{t-1}^l(S_{t-1}^l)^\top G'_{t,l}.
+$$
+
+这里 $G'_{t,l}$ 可以是 LoRA 参数的梯度，也可以是 full-rank 参数梯度的低秩压缩版本。GORP 的一个特点是它同时训练 LoRA 参数和少量 full-rank 参数；full-rank 参数不是直接完整更新，而是先做低秩分解：
+
+$$
+G_{t,l}=U_l\Sigma_lV_l^\top,\quad
+G'_{t,l}=U_{l,k}^\top G_{t,l}V_{l,k}.
+$$
+
+再投影、Adam 更新、映射回原维度：
+
+$$
+\tilde G_{t,l}=\alpha U_{l,k}P_{t,l}V_{l,k}^\top.
+$$
+
+直觉上，GORP 想同时要两样东西：full-rank 参数给塑性，低秩梯度投影给稳定性。
+
+实验设置上，GORP 使用 T5-Large 770M 和 LLaMA2-7B。T5 中 LoRA 替换 SelfAttention，full-rank 参数放在 EncDecAttention；LoRA learning rate `1e-3`，full-rank learning rate `1e-5`，rank 都是 `8`，batch size `8` per device，eval batch size `64`，weight decay `0`，$\lambda=0.05$，低秩更新间隔为 `10`。LLaMA2 中 LoRA 用 Self-attn，full-rank 参数放在 MLP Gate。
+
+主表很强：
+
+| 方法 | T5 Standard avg | T5 Long avg | LLaMA2-7B avg |
+|---|---:|---:|---:|
+| O-LoRA | `75.8` | `69.6` | `76.1` |
+| N-LoRA | `78.8` | `72.4` | `77.6` |
+| GORP | `79.8` | `76.0` | `78.6` |
+| MTL | `80.0` | `76.5` | - |
+
+这张表说明 GORP 在 Standard 上几乎贴近 MTL 上界，在 Long 上也非常接近 MTL。更重要的是 BWT 表：
+
+| 方法 | Standard BWT | Long BWT |
+|---|---:|---:|
+| O-LoRA | `-7.8` | `-16.4` |
+| N-LoRA | `-4.9` | `-6.5` |
+| GORP | `-0.8` | `-4.3` |
+
+BWT 越接近 0，遗忘越少。这个表说明 GORP 不只是最终平均准确率高，它确实显著减少了旧任务倒退。需要谨慎的是，论文的 FLOPs 表统计口径更像低秩操作本身，而不是完整系统训练总 FLOPs；更稳妥的阅读方式是看 time/task，GORP 与 O-LoRA 大致接近。
+
+### PS-LoRA：防止大幅度反向更新
+
+PS-LoRA 的问题意识更细：即使我们不让子空间冲突，也可能出现逐元素层面的“方向翻转”。一个参数位置上，旧任务希望它往正方向走，新任务却给一个很大的反向更新，这种 destructive update 会直接破坏旧知识。
+
+所以 PS-LoRA 的核心不是简单正交，而是 penalize 两件事：
+
+1. 更新幅度过大；
+2. 新旧更新符号相反，且反向幅度足以覆盖旧更新。
+
+可以把它理解成逐元素版本的“别把旧任务刚修好的旋钮反手拧回去”。训练后，PS-LoRA 再做合并：对同一个位置，保留绝对值更大的 LoRA 更新，或者按规则选择更可信的更新方向。
+
+它的实验设置和 O-LoRA/N-LoRA 系列高度接近，覆盖 T5 与 LLaMA2，Standard CL 和 Long sequence。主结果大致是：
+
+| 方法 | T5 Standard | T5 Long | LLaMA2 Standard | LLaMA2 Long |
+|---|---:|---:|---:|---:|
+| PS-LoRA | `79.6` | `75.5` | `80.8` | `76.3` |
+
+组件消融最能说明方法：
+
+| PS-Loss | Merging | Standard | Long |
+|---|---:|---:|---:|
+| 无 | 无 | `67.8` | `58.0` |
+| 无 | 有 | `76.1` | `70.5` |
+| 有 | 无 | `78.6` | `73.6` |
+| 有 | 有 | `79.6` | `75.5` |
+
+读这张表时要抓住：合并策略本身贡献很大，PS-Loss 本身也贡献很大，二者叠加最好。也就是说 PS-LoRA 的主张不是“只靠一个正则项”，而是“训练时控制破坏性更新，训练后再按位置合并”。
+
+### SLAO：正交初始化后持续合并成单 LoRA
+
+SLAO，也可以理解为 Merge before Forget 这类思路，关注的是另一个痛点：如果每个任务都保存一个 LoRA，任务数一多，存储和推理管理都会变复杂。那能不能训练一个任务、合并一次，始终维持一个 LoRA？
+
+SLAO 的做法是：对新任务 LoRA 的 $A$ 做正交初始化，使它尽量落在旧 $A$ 的正交补里；训练后不保留一堆 task-specific adapters，而是把 $B$ 或更新合并进一个持续维护的 LoRA。常见权重形式类似：
+
+$$
+\lambda_i=\frac{1}{\sqrt{i}},
+$$
+
+也就是任务越往后，合并时越谨慎，避免新任务一次性冲掉旧任务。
+
+关键实验结果：
+
+| 设置 | SLAO |
+|---|---:|
+| Llama2-7B Standard | `80.4` |
+| Llama2-7B Long | `74.8` |
+| SuperNI | `37.2` |
+| BWT | `-3.5` |
+
+初始化消融也很重要：
+
+| 初始化 | Standard | Long | SuperNI |
+|---|---:|---:|---:|
+| Random | `65.7` | `59.6` | `31.1` |
+| Last-Merge | `80.3` | `74.2` | `34.0` |
+| Last-FT | `80.4` | `74.8` | `37.2` |
+
+这说明 SLAO 的关键不是“合并”这两个字，而是合并前的新任务初始化必须和历史方向协调好。随机初始化会明显崩。
+
+### InfLoRA 与 KeepLoRA：固定一个矩阵，训练另一个矩阵
+
+这里可以把前面讨论过的 InfLoRA 和 KeepLoRA 放进来，因为它们和 O-LoRA 的差异很有代表性。
+
+标准 LoRA 是：
+
+$$
+\Delta W=BA.
+$$
+
+O-LoRA 通常训练两个因子，并让任务子空间彼此正交。InfLoRA 和 KeepLoRA 则更像是：**先构造或固定其中一个矩阵，把它当成安全方向或任务方向，再只训练另一个矩阵**。
+
+InfLoRA 固定的是由输入特征空间和历史梯度正交补构造出来的一个 LoRA 因子。它的直觉是：新任务更新应该在不干扰旧任务特征/梯度空间的方向上展开。KeepLoRA 则更强调当前任务梯度残差：用当前任务相对历史空间的残差初始化或固定一个矩阵，再训练另一个矩阵，让 LoRA 从一开始就偏向“新任务确实需要、旧任务没占用”的方向。
+
+这两类方法和 O-LoRA/N-LoRA/GORP 的区别是：
+
+| 路线 | 固定什么 | 训练什么 | 正交发生在哪里 |
+|---|---|---|---|
+| O-LoRA | 历史 LoRA | 当前 $A,B$ | LoRA 子空间之间 |
+| InfLoRA | 一个由特征/梯度正交补构造的因子 | 另一个因子 | 输入特征和历史梯度空间 |
+| KeepLoRA | 一个由当前梯度残差确定的因子 | 另一个因子 | 当前任务残差方向 |
+| N-LoRA | 不固定单因子，稀疏 $\Delta W$ | 当前 LoRA | 参数位置 non-collision |
+| GORP | 历史梯度 shared space | LoRA + 少量 full-rank | 梯度投影空间 |
+
+所以，如果把它们放到同一张研究地图里，InfLoRA/KeepLoRA 是“固定两个矩阵之一”的路线；O-LoRA/N-LoRA/OLieRA 是“训练 LoRA，但对子空间/更新加约束”的路线；GORP 则是“把约束对象从参数移到梯度”的路线。
+
+### 这一组 baseline 给我的提醒
+
+这些方法不是简单地互相替代，而是在逐层拆开 O-LoRA 的假设：
+
+- O-LoRA 假设子空间正交足够；
+- N-LoRA 说子空间正交不等于参数不碰撞；
+- GORP 说参数约束不等于梯度不冲突；
+- PS-LoRA 说梯度/参数空间之外，还有逐元素符号和幅度破坏；
+- SLAO 说即便训练有效，也要面对多 LoRA 存储、推理与合并；
+- InfLoRA/KeepLoRA 则从一开始就把一个 LoRA 因子固定在“安全方向”上。
+
+这条演化链让后面的 ELLA 和 SFOR/BOD 更容易理解：ELLA 进一步追问“是不是所有历史方向都该避开”，SFOR/BOD 则追问“即使你写了正交约束，LoRA 的双线性参数化和 AdamW 真的会照做吗”。
+
+过渡到第五问：如果严格正交不总是好，能不能只保护历史高能方向，把低能方向留给迁移？
+
+## 五、ELLA：能不能只去相关高能历史方向？
 
 ELLA 是我读起来最像“对严格正交做减法”的一篇。它不想把新任务完全推到历史子空间的正交补，而是问：历史更新里哪些坐标真的重要？
 
@@ -462,7 +688,7 @@ base LLM 冻结，在 Attention Q/V 层使用 LoRA rank 8。每个任务训练�
 
 过渡到最后一问：如果我们不再相信“正交越硬越好”，那还有一个更基础的问题。LoRA 是 $\Delta W=BA$，只约束 $A$ 或某个子空间，优化器会不会从 $B$ 逃出去？
 
-## 五、SFOR/BOD 作者稿：双线性 LoRA 会不会绕过正交？
+## 六、SFOR/BOD 作者稿：双线性 LoRA 会不会绕过正交？
 
 这部分篇幅最长，因为它直接回答上一篇结尾的问题：O-LoRA 式正交保护到底哪里可能失效。这里讨论的是用户提供的作者稿；我只把它作为 author-provided draft 解读，不提供公共 URL，也不引用稿件里的模板性提交信息。
 
@@ -759,18 +985,46 @@ SFOR 的 replay 条件很干净：不 replay。base SFOR 严格零参数增长�
 - 实验主要围绕 LLaMA-2-7B、Qwen-2.5-3B、rank 8；部分表格是 single-seed representative，虽然稿件称稳定指标方差可忽略。
 - 有些抽取表行不完整，我没有引用缺失行。
 
-## 六、横向比较：哪些数字能比，哪些不能比？
+## 七、横向比较：哪些数字能比，哪些不能比？
 
-| 维度 | Sculpting Subspaces | OA-Adapter | OLieRA | ELLA | SFOR/BOD |
-|---|---|---|---|---|---|
-| 更新对象 | 全参数 projected fine-tuning | Adapter modules | 每任务 LoRA + 乘性更新 | LoRA + 聚合能量正则 | 冻结 basis 的 LoRA routing + WRP |
-| 主要问题 | 全参表达力与少遗忘 | 动态预算与正交 | 参数几何与正交 | 选择性去相关 | 双线性优化逃逸 |
-| replay | 不参与梯度 replay；任务边界需上一任务样本或缓存统计量 | 主方法无 | 无 | 主方法无 | 无 |
-| 参数增长 | 固定 | task-specific adapter 管理，预算更省 | 每任务 LoRA 增长 | 无架构扩展，维护聚合矩阵 | base 零增长，Mature 有界增长 |
-| 推理 task ID | 不依赖 | 声称不需显式 task ID | 继承 O-LoRA | 不依赖 | 不依赖 |
-| 代表模型 | T5-Large / LLaMA-2 7B | T5-large / Llama-7B | T5-large / LLaMA-7B | T5-Large / LLaMA3.1-8B | LLaMA-2-7B / Qwen-2.5-3B |
-| 标准分类 headline | T5 `75.9` | T5 `76.0` | T5 `79.6` | T5 `79.9` | 7B SFOR `90.52`，但 O-LoRA `97.54` |
-| 异质任务 | TRACE `48.4` | SuperNI `29.3` | 未报 TRACE | TRACE T5 `40.0`，LLaMA `33.29` | TRACE Mature 7B `43.85/+5.37` |
+第一张表先比较方法对象：
+
+| 方法 | 更新对象 | 主要约束对象 | 想解决的问题 |
+|---|---|---|---|
+| Sculpting Subspaces | 全参数 projected fine-tuning | 权重 SVD 高奇异方向的正交补 | 全参表达力与少遗忘 |
+| OA-Adapter | Adapter modules | 动态激活的 adapter 上投影列 | 每层/每任务预算不同 |
+| OLieRA | 每任务 LoRA + 乘性更新 | $\exp(\Delta W)$ 对应的更新子空间 | 参数几何与正交 |
+| N-LoRA | 每任务 LoRA | $\Delta W=AB$ 的参数位置稀疏 | 正交但仍 collision |
+| GORP | LoRA + 少量 full-rank | Adam 一阶动量构造的梯度空间 | 梯度冲突与长序列遗忘 |
+| PS-LoRA | LoRA + 合并 | 逐元素幅度/符号方向 | 大幅度反向更新 |
+| SLAO | 持续合并的单 LoRA | 正交初始化与合并权重 | 多 LoRA 存储和推理管理 |
+| ELLA | LoRA + 聚合能量正则 | 高能历史方向 | 严格正交阻断迁移 |
+| SFOR/BOD | 冻结 basis 的 LoRA routing + WRP | 双线性因子与 AdamW 真实更新 | 优化器绕过正交 |
+
+第二张表再比较实验口径：
+
+| 维度 | O-LoRA 系列 baselines | Sculpting / OA / OLieRA / ELLA | SFOR/BOD |
+|---|---|---|---|
+| 常见 benchmark | Standard CL、15-task Long、LLaMA/T5 复现实验 | Standard、Long、TRACE 或 SuperNI，各论文不同 | 5-task classification、TRACE、15-task 探针 |
+| 代表模型 | T5-large、LLaMA/LLaMA2-7B | T5-Large、LLaMA-2/3.1、T5-XL 等 | LLaMA-2-7B、Qwen-2.5-3B，另有 1.5B/32B 探针 |
+| replay 条件 | 多数主方法无 replay | Sculpting 需旧任务样本或缓存统计量估计层重要性；其他多为无 replay | 无 replay |
+| 参数增长 | O-LoRA/N-LoRA/OLieRA 多为每任务 LoRA；SLAO 追求单 LoRA | OA task-specific adapter；ELLA 无架构扩展 | base 零增长，Mature 有界增长 |
+| 推理 task ID | 多数声称 task-ID-free 或继承 O-LoRA 设置 | 多数不依赖显式 task ID | 不依赖 |
+| 最该看的机制指标 | AA、BWT、OO、ACR、FR | AA、FWT/BWT、MOPD/AOPD、GA | FM、BWT、Drift Sim、$\|B\|_F$、orthogonal error |
+
+第三张表只放一些 headline 数字，提醒自己别混着排名：
+
+| 设置 | 代表结果 | 怎么读 |
+|---|---:|---|
+| N-LoRA T5 Standard/Long | `78.8/72.4` | 比 O-LoRA `75.8/69.6` 高，说明 collision 视角有效 |
+| GORP T5 Standard/Long | `79.8/76.0` | 这组 baseline 里最强之一，尤其 BWT `-0.8/-4.3` |
+| OLieRA T5 Standard/Long | `79.6/72.6` | Standard 强，Long 相对 N-LoRA 只小幅提升 |
+| PS-LoRA T5 Standard/Long | `79.6/75.5` | PS-Loss 与 merging 都有贡献 |
+| SLAO Llama2 Standard/Long/SuperNI | `80.4/74.8/37.2` | 单 LoRA 合并路线很有工程吸引力 |
+| Sculpting T5 5-task/15-task | `75.9/71.3` | 全参投影成本和 PEFT 不同，不能只看 AA |
+| OA-Adapter Standard/Long/SuperNI | `76.0/69.2/29.3` | 预算自适应有用，但绝对分数不是最强 |
+| ELLA T5 Standard/Long/TRACE | `79.9/73.6/40.0` | selective decorrelation 对迁移友好 |
+| SFOR TRACE Mature 7B | `43.85`，BWT `+5.37` | 主张在机制稳定性，不是所有 headline 都赢 |
 
 为了避免“平均值”遮住任务顺序，这里把主要 task-order 覆盖压缩列一下：
 
@@ -780,10 +1034,19 @@ OA / OLieRA / ELLA standard orders:
 2. DBpedia -> Amazon -> AG -> Yahoo
 3. Yahoo -> Amazon -> AG -> DBpedia
 
+N-LoRA / GORP / OLieRA common standard table:
+Order-1/2/3 use the same DBpedia/Amazon/Yahoo/AG permutations in most reproduced settings.
+Their "5 text classification datasets" wording often includes Yelp in the dataset pool,
+but several main tables report four-task orders.
+
 Long-order representative used by OA/OLieRA/ELLA appendices:
 MNLI -> CB -> WiC -> COPA -> QQP -> BoolQA -> RTE -> IMDB
 -> Yelp -> Amazon -> SST-2 -> DBpedia -> AG -> MultiRC -> Yahoo
 The remaining two long-order permutations are listed in the corresponding paper appendices.
+
+GORP TRACE order:
+c-stance -> fomc -> meetingbank -> py150 -> scienceqa
+-> numglue-cm -> numglue-ds -> 20minuten
 
 ELLA TRACE order:
 c-stance -> fomc -> meetingbank -> py150 -> scienceqa
@@ -804,7 +1067,7 @@ SFOR 5-task permutations:
 - AA、OA、Avg Acc、FWT、BWT、FM、Drift Sim 不是同一个指标。
 - SFOR 的 scaling-buffer 结论不等于“7B 上 SFOR 永远最好”；恰恰相反，同质 7B classification 中 O-LoRA headline 更高。
 
-## 七、旁注：C-LoRA、DOC、SLICE 为什么不进五篇主线？
+## 八、旁注：C-LoRA、DOC、SLICE 为什么不进主线？
 
 这三条线都相关，但我没有把它们做成深度 profile。
 
@@ -816,15 +1079,21 @@ SFOR 5-task permutations:
 
 它们提醒我一件事：正交并不是唯一语言。有人从 routing 来看，有人从功能方向漂移来看，有人从梯度冲突初始化来看。本文只沿“正交子空间到双线性优化失稳”这条线走到底。
 
-## 八、我现在的理解
+## 九、我现在的理解
 
-如果把五篇连起来看，我会这样理解这条发展线：
+如果把这些论文连起来看，我会这样理解这条发展线：
 
 Sculpting Subspaces 先把问题从 LoRA 拉回全参数空间：旧知识可能藏在高奇异值/高曲率方向，新任务可以走正交补。
 
 OA-Adapter 说：就算我们在小模块里做正交，也不能假设每层、每个任务都需要同样预算。
 
 OLieRA 说：即便子空间正交，LoRA 的加性更新也许不是最自然的参数几何，乘性更新能更温和地保留结构。
+
+N-LoRA 说：正交还不够，因为两个任务可以一边内积为零，一边在同一参数位置互相覆盖。
+
+GORP 说：参数还不够，因为真正训练时发生作用的是梯度轨迹；用 Adam 一阶动量追踪历史梯度空间，比静态参数约束更动态。
+
+PS-LoRA 和 SLAO 则把问题推到训练后：前者处理逐元素破坏性更新和合并，后者处理多任务 LoRA 如何压成一个可持续维护的 LoRA。
 
 ELLA 说：严格正交会消耗自由度，也可能阻断迁移；与其禁止所有 overlap，不如选择性压低高能历史方向。
 
@@ -836,7 +1105,7 @@ SFOR/BOD 则把刀口插进 LoRA 参数化本身：$\Delta W=BA$ 是双线性的
 
 > 正交约束能减少某些可测子空间里的干扰，但它是否真正保护知识，取决于更新对象、参数化方式、优化器物理轨迹、任务异质性、模型规模，以及未来任务还能使用多少剩余自由度。
 
-## 九、开放问题
+## 十、开放问题
 
 1. 旧任务“知识”到底应该用权重奇异方向、梯度方向、激活功能方向，还是 LoRA 更新方向来表示？
 2. 正交保护和正迁移之间有没有可学习的门控，而不是固定的硬约束或单一 $\lambda$？
@@ -853,8 +1122,13 @@ SFOR/BOD 则把刀口插进 LoRA 参数化本身：$\Delta W=BA$ 是双线性的
 
 - Sculpting Subspaces: Constrained Full Fine-Tuning in LLMs for Continual Learning, arXiv:2504.07097, https://arxiv.org/abs/2504.07097
 - Adaptive Budget Allocation for Orthogonal-Subspace Adapter Tuning in LLMs Continual Learning, arXiv:2505.22358, https://arxiv.org/abs/2505.22358
+- Is Parameter Collision Hindering Continual Learning in LLMs?, arXiv:2410.10179, https://arxiv.org/abs/2410.10179
+- Continual Gradient Low-Rank Projection Fine-Tuning for LLMs, arXiv:2507.02503, https://arxiv.org/abs/2507.02503
 - Orthogonal Low-rank Adaptation in Lie Groups for Continual Learning of Large Language Models, arXiv:2509.06100, https://arxiv.org/abs/2509.06100
+- PS-LoRA: a parameter-sign-aware LoRA continual learning method, local PDF notes.
+- Merge before Forget: sparse/orthogonal LoRA merging for continual learning, local PDF notes.
 - ELLA: Efficient Lifelong Learning for Adapters in Large Language Models, arXiv:2601.02232, https://arxiv.org/abs/2601.02232
+- InfLoRA and KeepLoRA, local PDF notes on fixed-one-matrix LoRA continual learning.
 - On the Instability of Orthogonal LoRA in Continual Learning: Bilinear Optimization Divergence, Scaling Buffer Effects, and Semi-Frozen Routing, author-provided draft.
 - C-LoRA: Continual Low-Rank Adaptation for Pre-trained Models, arXiv:2502.17920, https://arxiv.org/abs/2502.17920
 - Dynamic Orthogonal Continual Fine-tuning for Mitigating Catastrophic Forgettings, arXiv:2509.23893, https://arxiv.org/abs/2509.23893
