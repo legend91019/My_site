@@ -1,6 +1,6 @@
 ---
 title: "芯宝是怎么诞生的"
-summary: "一个桌面级对话机器人，具有情感陪伴和随身知识库功能"
+summary: "从桌面启动、意图路由到 RAG、流式生成和长期记忆，拆解芯宝的完整软件机制"
 date: 2026-05-21
 tags: ["RAG", "检索", "向量数据库", "机器人", "大创项目"]
 category: "项目总结"
@@ -12,300 +12,464 @@ draft: false
 
 ![芯宝系统架构图](./images/xinbao_framework.png)
 
-## 项目总体架构
-
-+ 输入层
-  - 语音输入
-  - 打字输入
-+ 分类层
-  - 关键词拦截
-    * 自带必要关键词
-    * 随着用户和AI对话"生长出来的"关键词
-  - 分类器classifier分类
-+ 回答层
-  - 分类层判定为不需要检索资料:只带着上下十段对话的短期记忆和用户交流
-  - 分类层判定为需要检索(retrieval)
-    * 首先，向量粗排，这一步是直接用余弦相似度计算距离最近的10份资料
-    * 然后，注意力细排(reranker)，把粗排找到的十份资料和用户问句拼在一起进行注意力打分，选出分数最高的3句话
-    * 细排得到的资料是"长期记忆"，把人格提示词，短期记忆，长期记忆，用户任务，好感度拼接为提示词
-+ 输出层
-  - 一个线程把提示词发给云端大模型，得到回答
-  - 一个线程将总结提示词发给大模型，总结触发搜索的关键词以及将记忆存入向量数据库
-  - 大模型流式文字回答，回答后会有语音回答(可选，在浏览器上语音效果不好，语音清洗掉了一些动作描写之类的)
+# 一、先给出结论：芯宝是什么
+
+芯宝不是一个把所有能力都塞进大模型的聊天页面，而是一个运行在 Windows 上的本地桌面应用。它把几个职责拆开：
+
+1. 浏览器页面负责交互、语音输入、流式文字显示、表情和音频播放。
+2. Python 后端负责 API、会话状态、好感度、路由、检索和提示词组装。
+3. 本地模型负责意图分类、文本向量化和候选记忆精排。
+4. DeepSeek 云端模型负责最终回答和长期记忆提取。
+5. ChromaDB 负责把知识片段和动态记忆持久化，并提供向量查询。
+
+本文只解释软件链路。仓库中的 `hardware_product/` 是面向板端/硬件产品的独立目录；本文不展开唤醒桥接、板端语音环路和硬件通信。
+
+## 1.1 一次回答的核心闭环
+
+~~~text
+用户输入
+  │
+  ▼
+FrontEnd/robot.html
+  │  POST /api/chat
+  ▼
+BackEnd/simple.py::handle_chat
+  │
+  ├─ 好感度更新与 Mood 映射
+  ├─ 关键词强制路由 / route_classifier 分类
+  ├─ 可选：ChromaDB 召回 + CrossEncoder 精排
+  ├─ 拼接系统提示词、短期历史和当前问题
+  └─ 请求 DeepSeek 流式生成
+       │
+       ├─ SSE 首包：好感度和表情变化
+       ├─ SSE 文本片段：前端逐段渲染
+       ├─ TTS：生成音频并返回 /static/... URL
+       └─ 回答结束后启动后台记忆提取线程
+~~~
+
+这里有一个重要的时序区别：**回答生成和长期记忆提取不是两个同时运行的回答线程**。后端先完成本次回答、语音和历史记录，再通过 `threading.Thread` 异步启动 `extract_and_save_memory()`；记忆提取失败不会回滚当前回答。
+
+# 二、项目结构：每个目录负责什么
+
+~~~text
+IntelliChat-Platform/
+├─ FrontEnd/                 # HTML/CSS/JavaScript 交互界面
+│  └─ robot.html
+├─ BackEnd/                  # Flask 路由和运行时服务
+│  ├─ simple.py              # 后端主编排层
+│  ├─ memory_admin.py        # 长期记忆增删改查
+│  ├─ tts_engine.py          # Edge-TTS / Index-TTS 适配
+│  └─ audio_player.py        # 本机音频播放
+├─ utils/
+│  ├─ Classifier/            # 轻量意图路由器
+│  └─ Retriever/             # knowledge.md 切块与向量检索器
+├─ models/
+│  ├─ embedding/             # SentenceTransformer 向量模型
+│  └─ reranker/              # CrossEncoder 精排模型
+├─ assets/classifier/
+│  └─ route_classifier.joblib# 已训练的路由分类器
+├─ knowledge.md              # 静态知识库源文件
+├─ dynamic_keywords.txt      # 后台记忆提取出的动态触发词
+├─ config.example.json       # 配置模板
+├─ runtime_paths.py          # 安装资源与用户数据路径
+├─ desktop_launcher.py       # 启动后端并打开桌面窗口
+├─ startup_checks.py         # GPU、模型和运行环境检查
+├─ tools/                    # 模型下载、构建和 Index-TTS 服务脚本
+├─ tests/                    # 单元测试和发布检查
+└─ hardware_product/         # 独立的板端/硬件产品代码
+~~~
+
+几个关键边界如下：
+
+| 模块 | 主要职责 | 不负责什么 |
+| --- | --- | --- |
+| `FrontEnd/robot.html` | 输入、SSE 解析、聊天渲染、表情、音频播放 | 不执行向量检索和模型推理 |
+| `BackEnd/simple.py` | 编排一次请求的完整生命周期 | 不实现 Embedding 或 CrossEncoder 内部算法 |
+| `utils/Classifier` | 输出 `pred=0/1` 的路由判断 | 不生成最终回答 |
+| `utils/Retriever` | 读取 `knowledge.md`、切块、入库并返回静态检索上下文 | 不负责 DeepSeek 生成 |
+| `BackEnd/memory_admin.py` | 长期记忆的列表、添加、修改、删除 | 不决定一条记忆是否值得自动保存 |
+| `BackEnd/tts_engine.py` | 文本清洗、TTS 引擎选择、生成音频 | 不决定回答内容 |
+
+# 三、程序如何启动
+
+## 3.1 桌面启动器
+
+普通用户启动的是 `desktop_launcher.py`。它的主要顺序是：
+
+1. 调用 `startup_checks.run_all(project_root())`，检查模型、GPU 和运行环境。
+2. 通过 `find_free_port()` 为本机地址 `127.0.0.1` 找一个可用端口。
+3. 启动子进程：`python -m BackEnd.simple --host 127.0.0.1 --port <port>`。
+4. 轮询 `/`，直到后端可以访问。
+5. 调用 `webview.create_window("芯宝 Xinbao", url, ...)` 打开桌面窗口。
+6. 窗口关闭后终止后端子进程。
+
+因此，桌面窗口本质上是一个本地 Web UI；前端使用相对路径访问同一个本地 Flask/Waitress 服务，不需要把 API 地址写死。
+
+## 3.2 后端初始化
+
+`BackEnd/simple.py` 在启动时执行 `init_model()`，一次性准备共享对象：
+
+~~~text
+init_model()
+  ├─ load_route_classifier(assets/classifier/route_classifier.joblib)
+  ├─ chromadb.PersistentClient(path=%APPDATA%/Xinbao/chroma_db)
+  ├─ get_or_create_collection("qbit_memory")
+  ├─ SentenceTransformer(models/embedding)
+  ├─ create_rag_retriever(knowledge.md, embed_model, collection)
+  └─ CrossEncoder(models/reranker)
+~~~
 
+模型和数据库连接放在全局变量 `embed_model`、`collection`、`reranker_model` 中，后续请求重复使用，避免每次聊天重新加载几百 MB 的模型。
 
----
-# 项目总览
+服务就绪后由 Waitress 提供 WSGI 服务。健康检查接口 `/api/health` 在 `MODEL_READY=True` 前返回 `503`，模型和检索器初始化完成后才返回正常状态。
 
-## 一、 系统启动阶段：核心资产挂载与初始化
+## 3.3 数据在哪里保存
 
-当后端执行 `python simple.py` 时，系统并不会直接等待请求，而是先在后台进行**昂贵的单次硬件资源初始化**，防止每次对话都重复加载导致内存爆炸：
+安装目录中的代码和模型是只读资源；用户可写数据通过 `runtime_paths.py` 放在 `%APPDATA%\Xinbao\`：
 
-```
-[系统启动] 
-   │
-   ├──> 1. 加载意图分类器 (TextClassifier) ──> 挂载“交通警察”权重
-   ├──> 2. 初始化持久化数据库 (ChromaDB) ──> 建立边缘存储芯片连接
-   ├──> 3. 加载本地向量模型 (SentenceTransformer) ──> 准备将文字转化为数学向量
-   └──> 4. 加载交叉注意力精排模型 (CrossEncoder) ──> 挂载“深度阅读理解”引擎
+- `config.json`：主人称呼、身份、当前状态、API Key 和语音设置。
+- `favorability.json`：当前好感度分数。
+- `chroma_db/`：ChromaDB 持久化数据。
+- `uploads/`：上传文件。
+- `static/audio/`：运行时生成的语音文件。
+- `logs/`：后端运行日志。
 
-```
+`dynamic_keywords.txt` 当前由 `BackEnd/simple.py` 按项目相对路径写入仓库根目录，因此它与 `%APPDATA%\Xinbao` 下的用户数据不是同一类路径。
 
-同时，当你在前端点击 `[ SYSTEM CONFIG ]` 并保存时，你的**主人称呼、身份、近期状态**以及 **DeepSeek API Key** 会通过 `/api/settings` 统一注入本地的 `config.json`。
+# 四、一次聊天请求的完整过程
 
----
+## 4.1 前端捕获输入
 
-## 二、 交互与路由阶段：从用户输入到大脑决策
+用户可以打字，也可以通过浏览器 `Web Speech API` 把语音转成文字。`robot.html::sendMessage()` 做三件事：
 
-当你在输入框输入一句话（或通过 `Web Speech API` 转换为文字）并按下回车时，全链路的齿轮开始高速旋转：
+- 检查 `isTyping`，防止上一条消息还在流式返回时重复提交。
+- 先把用户消息渲染到页面，再创建一个带打字光标的机器人气泡。
+- 使用 `fetch('/api/chat', { method: 'POST', body: { message } })` 发起请求。
 
-### 1. 输入数据捕获 (Input Layer)
+发送前的短音频播放是浏览器自动播放策略的兼容处理：先用静音音频尝试解锁后续音频通道，不是后端语音生成的一部分。
 
-* 前端通过 `sendMessage()` 激活**防抖锁**（`isTyping = true`），防止你在模型回复期间连续点击造成数据错乱。
-* **静音解锁术**：前端在发送请求的同时，会悄悄利用一段极短的 Base64 哑音音频去触发一次 `voicePlayer.play()`。这是为了欺骗浏览器的安全策略（Safari/Chrome 不允许网页未经用户点击直接播放声音），为后续大模型的流式语音播报提前“解锁”音频通道。
+## 4.2 后端入口与快速分支
 
-### 2. 情感增惩与状态机 (Favorability & Mood System)
+`handle_chat()` 首先解析 JSON 或表单中的 `message`。如果消息为空，返回 `400`。
 
-* 后端通过 `/api/chat` 接收到你的问句后，首先读取 `favorability.json` 获取当前好感度。
-* **正则/关键词匹配**：后端用两组词表进行扫描：
-* 命中“乖、好可爱、喜欢你”等褒义词 $\rightarrow$ 好感度 $+3$，判定变脸状态为 `up`。
-* 命中“笨、讨厌、滚”等贬义词 $\rightarrow$ 好感度 $-5$，判定变脸状态为 `down`。
+接着读取 `favorability.json`。如果用户直接询问“好感度”“喜欢我吗”等问题，后端不调用 DeepSeek，而是根据当前分数直接返回固定文本，并把这次问答写入进程内 `chat_history`。
 
+这条快速分支体现了一个工程取舍：能由本地状态确定的回答，不必消耗一次云端 API 请求。
 
-* **情绪人设映射**：系统根据最终的好感度得分，自动将机器人的 Mood 划分为四个阶梯（$\ge 80$ 为极度粘人、$\le 30$ 为傲娇委屈、其余为阳光或小傲娇）。这个 Mood 稍后会直接变成控制大模型说话语气的 Prompt 约束。
+## 4.3 好感度更新
 
-### 3. 智能路由中枢 (Dual-Engine Routing)
+普通消息会扫描两组词表：
 
-系统需要决定：你是想跟芯宝闲聊，还是在考考她的记忆？
+~~~python
+add_words = ["乖", "真棒", "厉害", "太聪明了", "好可爱", "超可爱", "爱你", "喜欢你", "贴贴", "抱抱", "摸摸头", "揉揉头"]
+sub_words = ["笨", "讨厌", "很烦", "坏", "傻", "闭嘴", "滚", "走开", "不理你", "没用", "差劲"]
+~~~
 
-* **第一道防线：知识拦截（规则引擎）**
-后端将本地静态关键词（如“芯宝、开发、谁”）与历史对话中“生长出来的”动态关键词（`dynamic_keywords.txt`）合并成一个庞大的拦截池。只要你的问句里包含其中任意一个词，**强制切换为 RAG 模式**。
-* **第二道防线：AI 意图推断（模型引擎）**
-如果规则未命中，则将问句送入深度学习分类器（`TextClassifier`）进行预测，输出 `pred == 1`（需要检索）或 `pred == 0`（直接闲聊）。
+命中加分词时增加 3 分，命中减分词时减少 5 分；代码使用 `if ... elif`，同一条消息最多执行一种变化。`save_favorability()` 用 `clip` 将结果限制在 `[0,100]`：
 
----
-
-## 三、 数据检索与熔炼阶段：知识库增强（RAG）的双重过滤器
-
-如果路由中枢判定需要检索（`pred == 1`），系统就会启动高效的**工业级漏斗检索机制**：
-
-```
-     【用户提问】 (例如: "我以前跟你说过我喜欢吃什么吗？")
-         │
-         ▼
- ┌────────────────────────────────────────────────────────┐
- │ 1. 召回阶段 (Recall / 向量粗排)                         │
- │    - SentenceTransformer 将问句转化为向量。              │
- │    - 在 ChromaDB 数据库中计算数学距离，拉出 Top-10 备选。 │
- │    - 阈值初筛：仅保留距离 dist < 1.5 的记忆碎片。        │
- └────────────────────────────────────────────────────────┘
-         │
-         ▼ (粗筛出的 10 条这时序记忆)
- ┌────────────────────────────────────────────────────────┐
- │ 2. 排序阶段 (Rerank / 交叉细排)                         │
- │    - 引入 CrossEncoder (BGE 精排模型)。                  │
- │    - 将“用户问句”与“10条记忆”两两拼接，进行逐字注意力打分。  │
- │    - 强力过滤：得分 <= 0 的凑数噪声直接丢弃。              │
- │    - 最终截取相关性最高、逻辑最契合的 Top-3 核心记忆。       │
- └────────────────────────────────────────────────────────┘
-         │
-         ▼ (精排出的 3 条黄金记忆 + 带有时间戳)
- ┌────────────────────────────────────────────────────────┐
- │ 3. 终极融炉 (Context Synthesis)                        │
- │    - 静态资料：读取 knowledge.md 并替换主人设定。        │
- │    - 动态资料：注入带时间戳的 Top-3 精排记忆。            │
- └────────────────────────────────────────────────────────┘
-
-```
-
----
-
-## 四、 响应与自我进化阶段：流式输出与异步学习
-
-这是整套系统最惊艳、技术含量最高的设计。为了防止网络卡顿、同时让机器人表现出实时灵动感，它采用了**时序与线程解耦**的流式闭环：
-
-### 1. 流式首包推下：前端 3D 变脸
-
-后端通过标准 SSE（Server-Sent Events）建立长连接。在呼叫云端大模型之前，后端会**率先向通道里丢出第一个数据包**，里面只包含最新的好感度得分和变脸信号（`up` / `down`）。
-前端拿到首包后，立刻给机器人的 HTML 组件挂载 `.happy` 或 `.sad` 样式，让机器人的眼睛在文字还没出来前，就已经开心地扬起或委屈地垂下！
-
-### 2. 文本流式吐出与渲染
-
-大模型（DeepSeek）一边生成回答，后端一边通过 `yield` 将字词碎片（`chunk`）源源不断地推给前端。前端通过流式解析器（利用 `buffer.split('\n')` 配合 `pop()` 防止网络截断导致半个 JSON 字符崩溃的工业级防错机制）实时把字词追加到屏幕上，并触发打字机光标和自动滚动。
-
-### 3. 音频异步清洗与播报
-
-当文字全部传输完毕，后端主线程解除等待。此时：
-
-* **文本净化**：后端用正则表达式剔除掉文本里的 `[表情]`、`(动作)` 以及 markdown 标点，只留下纯文本。
-* **异步 TTS 生成**：在 Python 的独立事件循环中，呼叫 `edge-tts` 将净化后的文本转为 `Reply_xxxx.mp3` 存入静态文件夹，同时启动自动清理机制删掉 3 分钟前的旧音频。
-* **播放**：前端收到最后的 `done` 信号和音频 URL 后，直接调用之前的 `voicePlayer` 顺畅地播放出美妙的少女音！
-
-### 4. 异步多线程“长出新记忆”（自我进化）
-
-在把回复完整的交付给用户后，为了不让用户在前端感知到卡顿，后端会**偷偷开辟一条独立的子线程**（`threading.Thread`）去调用 `extract_and_save_memory`：
-
-* 这条线程会拿着你刚刚说的话，重新呼叫一次大模型，让大模型扮演一个“无感情的记忆提取机器”。
-* 如果发现有长期价值（如“主人喜欢吃三文鱼”），大模型会将其提炼为**第三人称客观陈述句**，并提炼出**专属唤醒词**。
-* 随后，子线程将这段陈述句打上当前的时间戳，逆向写入 ChromaDB 的持久化芯片中，同时把唤醒词追加进 `dynamic_keywords.txt`。
-
-**至此，全链路闭环完成。** 机器人不仅回答了你的问题，展现了符合好感度的表情，还顺便在后台完成了自我进化。当你下一次提到这个唤醒词时，它就会在智能路由中精准命中，并通过双重精排漏斗把这段记忆完整地重现出来！
-
----
-# 一些数学原理:
-
-
-
-
-## 一、 向量化（Embedding）的数学本质
-
-向量化是将离散的文本符号映射到高维连续向量空间 $\mathbb{R}^d$ 的过程。在芯宝挂载的 `SentenceTransformer` 中，其数学本质是利用深度双向 Transformer 编码器提取语义表征。
-
-### 1. 编码与上下文表征
-
-假设输入的句子经过分词（Tokenization）后得到序列 $X = [x_1, x_2, \dots, x_n]$，其中 $x_i$ 是输入的词向量。
-经过多层 Transformer 自注意力层堆叠运算后，每个位置的 Token 都会吸收全句的上下文信息，输出隐藏状态矩阵：
-
-
-$$H = [h_1, h_2, \dots, h_n] \in \mathbb{R}^{n \times d}$$
-
-### 2. 向量池化（Pooling）
-
-为了将矩阵 $H$ 压缩为代表整句话的单一向量 $\mathbf{u} \in \mathbb{R}^d$，代码中通常采用 **Mean Pooling（平均池化）**：
-
-
-$$\mathbf{u} = \frac{1}{n} \sum_{i=1}^{n} h_i$$
-
-### 3. 向量归一化（L2 Normalization）
-
-代码中显式设置了 `normalize_embeddings=True`。其数学公式为：
-
-
-$$\mathbf{v} = \frac{\mathbf{u}}{\|\mathbf{u}\|_2} = \frac{\mathbf{u}}{\sqrt{\sum_{j=1}^{d} u_j^2}}$$
-
-* **数学妙处：** 归一化后的向量模长 $\|\mathbf{v}\|_2 = 1$。此时，两个向量的**内积（Dot Product）**在数值上完全等于它们的**余弦相似度（Cosine Similarity）**：
-
-$$\text{Sim}(\mathbf{v}_1, \mathbf{v}_2) = \frac{\mathbf{v}_1 \cdot \mathbf{v}_2}{\|\mathbf{v}_1\|_2 \|\mathbf{v}_2\|_2} = \mathbf{v}_1 \cdot \mathbf{v}_2$$
-
-
-
-这极大地简化了后续 ChromaDB 的计算几何复杂度。
-
----
-
-## 二、 粗排阶段：ChromaDB 的度量几何与索引原理
-
-在粗排（Recall）阶段，面对成千上万的时序记忆，如果进行暴力全量搜索（Linear Scan），时间复杂度为 $\mathcal{O}(N \cdot d)$。ChromaDB 的底层核心是利用 **HNSW（Hierarchical Navigable Small World，分层可导航小世界）** 图算法将复杂度降至 $\mathcal{O}(\log N)$。
-
-### 1. 相似度度量：平方 L2 距离（Squared L2 Distance）
-
-代码中粗排初筛的阈值设置为 `dist < 1.5`。ChromaDB 默认的 `l2` 度量公式为：
-
-
-$$D(\mathbf{q}, \mathbf{m}) = \|\mathbf{q} - \mathbf{m}\|_2^2 = \sum_{j=1}^{d} (q_j - m_j)^2$$
-
-
-其中 $\mathbf{q}$ 为当前用户提问向量，$\mathbf{m}$ 为时序记忆向量。
-
-* **博客扩展技巧（数学转换）：**
-展开上式：$\|\mathbf{q} - \mathbf{m}\|_2^2 = \|\mathbf{q}\|_2^2 + \|\mathbf{m}\|_2^2 - 2\mathbf{q} \cdot \mathbf{m}$。
-因为我们在 Embedding 阶段对向量做了 L2 归一化，所以 $\|\mathbf{q}\|_2^2 = 1$，$\|\mathbf{m}\|_2^2 = 1$。
-代入可得：
-
-$$D(\mathbf{q}, \mathbf{m}) = 1 + 1 - 2\cos(\theta) = 2(1 - \cos(\theta))$$
-
-
-
-当阈值 $D < 1.5$ 时，意味着 $2(1 - \cos(\theta)) < 1.5 \implies \cos(\theta) > 0.25$。这在数学上定量解释了为什么该阈值能放宽初筛标准，允许“字面不太像但存在深层关系”的记忆进入复试。
-
-### 2. HNSW 分层图跳跃机制
-
-HNSW 借鉴了计算机跳表（Skip List）的思想。
-
-* **第 $L$ 层（高层）：** 图的稀疏度极高，节点间跨度大。查询向量 $\mathbf{q}$ 在高层快速进行“大步跳跃”，定位到局部大致区域。
-* **第 $0$ 层（底层）：** 包含所有记忆节点。沿着高层定位的局部区域向下切入，在底层进行贪心搜索（Greedy Search），利用朴素的 L2 距离公式逼近最近邻。
-
----
-
-## 三、 细排阶段：Cross-Encoder（精排）的注意力数学推导
-
-细排使用了 `CrossEncoder`（交叉编码器）。它与粗排（Bi-Encoder 双塔架构）有着本质的区别：**双塔架构在计算余弦相似度时，问句和记忆向量之间没有发生过任何动态的信息交织；而 Cross-Encoder 则在第一层就让它们融合。**
-
-### 1. 输入拼接（All-in-One Input）
-
-精排模型将 Query $Q$ 和得到的候选 Document $D$ 拼接为一个整句：
-
-
-$$\text{Input} = \text{[CLS]} \ q_1 \ q_2 \ \dots \ q_m \ \text{[SEP]} \ d_1 \ d_2 \ \dots \ d_k \ \text{[SEP]}$$
-
-### 2. 核心：多头自注意力（Multi-Head Self-Attention）计算
-
-在 Transformer 的注意力机制中，输入的每一个 Token 都要去和其他所有 Token 计算相关性。
-对于拼接后的嵌入矩阵 $X \in \mathbb{R}^{(m+k+2) \times d}$，通过三个不同的权重矩阵 $W_Q, W_K, W_V \in \mathbb{R}^{d \times d_k}$ 进行线性变换，得到 Query、Key、Value 矩阵：
-
-
-$$Q = XW_Q, \quad K = XW_K, \quad V = XW_V$$
-
-缩放点积注意力（Scaled Dot-Product Attention）的推导公式为：
-
-
-$$\text{Attention}(Q, K, V) = \text{Softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
-
-* **博客硬核解析：**
-矩阵乘法 $QK^T$ 的每一个元素 $A_{ij} = \frac{\mathbf{q}_i \cdot \mathbf{k}_j}{\sqrt{\sqrt{d_k}}}$，实际上是**全交互的注意力图（Attention Map）**。这意味着，问句中的某个词（如“喜欢”）和记忆中的某个词（如“三文鱼”），在矩阵相乘的瞬间，其权重直接发生相乘相加运算。
-$\text{Softmax}$ 函数将其转化为概率分布：
-
-$$\text{Softmax}(A_{ij}) = \frac{\exp(A_{ij})}{\sum_{l} \exp(A_{il})}$$
-
-
-
-### 3. 分类输出与硬性截断
-
-模型最终提取整句开头的 `[CLS]` 标记对应的隐藏向量 $h_{\text{[CLS]}}$（它已经通过多层注意力完全吸干了 $Q$ 和 $D$ 的交叉交互语义），通过一个线性层预测出相关性得分 $S$：
-
-
-$$S = \mathbf{w}^T h_{\text{[CLS]}} + b$$
-
-
-代码中实施了漏斗截断规则：
-
-
-$$\text{Filter}(S) = \begin{cases} \text{保留} & S > 0 \\ \text{丢弃} & S \le 0 \end{cases}$$
-
-
-这个 $0$ 分界线在数学上代表 Cross-Encoder 的对数几率（Logits）跨越了中性阈值，小于 $0$ 意味着该条时序记忆对解答当前问题是负向噪声。
-
----
-
-## 四、 博客补充增色：好感度衰减与奖励的离散马尔可夫动态（建议补充）
-
-为了让你的博客更加丰满，你可以把你系统里“生长出来的”好感度逻辑，上升到**离散状态状态机与马尔可夫决策**的数学高度来写。
-
-代码中的好感度奖励与惩罚机制可以抽象为一个离散动态系统：
-
-
-$$F_{t+1} = \text{clip}\left(F_t + \Delta F(X_t), \ 0, \ 100\right)$$
+$$
+F_{t+1}=\operatorname{clip}(F_t+\Delta F_t,0,100)
+$$
 
 其中：
 
-* $F_t$ 是 $t$ 时刻的好感度分数。
-* $X_t$ 为用户输入的文本特征。
-* $\Delta F(X_t)$ 是基于关键词算子的离散映射状态：
+$$
+\Delta F_t=\begin{cases}
++3, & \text{命中加分词}\
+-5, & \text{否则命中减分词}\
+0, & \text{都未命中}
+\end{cases}
+$$
 
-$$\Delta F(X_t) = \begin{cases} +3 & \text{if } X_t \in \text{add\_words} \\ -5 & \text{if } X_t \in \text{sub\_words} \\ 0 & \text{otherwise} \end{cases}$$
+分数再映射为 Prompt 中的 Mood：
 
+| 分数 | Mood 提示 |
+| --- | --- |
+| `F >= 80` | 软萌、撒娇、非常粘人 |
+| `51 <= F < 80` | 阳光可爱、温柔回应 |
+| `31 <= F <= 50` | 小傲娇、回答简洁 |
+| `0 <= F <= 30` | 生气、傲娇、委屈但不恶毒 |
 
-* $\text{clip}(x, a, b) = \max(a, \min(x, b))$ 提供了状态空间的**边界紧致性（Boundary Compactness）**，确保状态空间 $S \in [0, 100]$。
+Mood 不是独立的情绪模型，而是一个离散区间门控函数：
 
-### 情绪区间的概率分段函数（Gate Function）
+$$
+M(F)=\begin{cases}
+M_1, & F\ge 80\
+M_2, & 50<F<80\
+M_3, & 30<F\le 50\
+M_4, & F\le 30
+\end{cases}
+$$
 
-系统利用门控函数将连续得分 $F$ 离散化映射为 4 个非重叠的人设状态域（Mood Contexts）：
+## 4.4 双引擎路由
 
+系统先调用 `classifier.predict([user_message])` 得到分类结果，再读取关键词池进行强制修正。
 
-$$M(F) = \begin{cases} \text{撒娇粘人} & 80 \le F \le 100 \\ \text{阳光温柔} & 50 < F < 80 \\ \text{简洁吐槽} & 30 < F \le 50 \\ \text{傲娇委屈} & 0 \le F \le 30 \end{cases}$$
+### 第一层：规则强制 RAG
 
+关键词池由两部分组成：
 
-这一步在数学上叫做**连续变量的区间离散化（Quantization）**，它为下游大模型的 Prompt 提供了极其稳定的条件概率输入（Conditional Prompting）。
+1. `config.json` 中的 `routing_settings.force_rag_keywords`，没有配置时使用默认词表，例如“芯宝、开发、记得、喜欢、谁、以前”等。
+2. `dynamic_keywords.txt` 中由后台记忆提取器追加的实体词。
 
----
+当消息长度大于 1 且包含任一关键词时，代码把 `pred` 强制设为 `1`。这相当于为分类器增加了一道高召回规则：涉及芯宝身份、用户历史、偏好或动态记忆的表达，优先进入 RAG。
 
+### 第二层：轻量分类器
+
+没有命中规则时，使用 `assets/classifier/route_classifier.joblib` 加载的 `RouteClassifier`。它保持统一的 `predict()` 接口，返回：
+
+- `pred = 0`：自由闲聊，不主动检索。
+- `pred = 1`：需要检索，进入 RAG 增强模式。
+
+`RouteClassifier` 还包含少量后处理：天气闲聊短语强制归为 `0`，查看、提醒、设备、历史记忆等操作词强制归为 `1`。
+
+可以把路由写成：
+
+$$
+R(q)=\begin{cases}
+1, & |q|>1\ \land\ q\text{ 命中规则关键词}\
+C(q), & \text{否则}
+\end{cases}
+$$
+
+其中 `C(q)` 是 `RouteClassifier` 的预测结果。
+
+# 五、RAG：静态知识和动态记忆如何进入回答
+
+芯宝的 RAG 有两个来源，但共用一个 ChromaDB collection `qbit_memory`：
+
+- **静态知识**：`knowledge.md`，描述项目设定、团队、世界观和固定资料。
+- **动态记忆**：用户对偏好、习惯和经历的长期陈述，例如“主人最喜欢吃三文鱼”。
+
+两者都保存为文档、向量和 metadata；metadata 中可区分 `type`、`source`、`title`、`timestamp` 和 `chunk_index`。
+
+## 5.1 knowledge.md 的切块与增量入库
+
+`utils/Retriever/retriever.py::create_rag_retriever()` 做如下处理：
+
+1. 按标题和空行分割 Markdown 块，记录当前章节标题。
+2. 再按 `。！？` 切分句子。
+3. 当当前块超过约 300 个字符时，生成一个知识 chunk。
+4. 用 `md 文件名 + chunk_index` 的 MD5 前 12 位作为稳定 ID。
+5. 查询现有 collection，只对新 ID 进行 Embedding 和 `upsert`。
+
+因此，重复启动不会重复向量化已有知识；知识源发生新增时，只计算新增块。
+
+静态检索器返回的 `retrieve(question)` 默认 `top_k=2`，它把召回的片段格式化为“类型、来源、章节、正文”。在 `init_model()` 中，静态检索器和聊天动态检索使用的是同一个 collection，所以静态检索结果也可能来自已经写入的动态记忆。
+
+## 5.2 动态记忆的 Top-10 → Top-3 漏斗
+
+当路由结果为 `pred=1` 时，`handle_chat()` 除了调用静态检索器，还直接对同一个 collection 执行动态候选筛选：
+
+### 第一步：Embedding
+
+用户问题经过 `SentenceTransformer.encode(..., normalize_embeddings=True)` 得到归一化向量：
+
+$$
+\mathbf{v}=\frac{\mathbf{u}}{\|\mathbf{u}\|_2},\qquad \|\mathbf{v}\|_2=1
+$$
+
+若原始句子经过 Transformer 后得到 token 隐藏状态 $h_1,\ldots,h_n$，常见的句向量可以抽象为池化结果：
+
+$$
+\mathbf{u}=\operatorname{Pool}(h_1,\ldots,h_n)
+$$
+
+具体池化由本地 SentenceTransformer 模型封装；当前业务代码只显式要求归一化输出。
+
+### 第二步：ChromaDB 召回 10 个候选
+
+代码执行：
+
+~~~python
+query_emb = embed_model.encode([user_message], normalize_embeddings=True).tolist()[0]
+results = collection.query(query_embeddings=[query_emb], n_results=10)
+~~~
+
+返回结果按 ChromaDB 的距离排序。当前代码保留 `dist < 1.5` 的候选：
+
+$$
+\mathcal{C}(q)=\{d_i\mid D(q,d_i)<1.5\}
+$$
+
+这里的 `1.5` 是业务层初筛阈值。本文不把 ChromaDB 的底层索引实现（例如具体图索引配置）冒充为本项目自定义算法；项目只通过 ChromaDB API 使用查询结果。
+
+如果向量已归一化且距离采用平方 L2，则有：
+
+$$
+\|\mathbf{q}-\mathbf{m}\|_2^2
+=\|\mathbf{q}\|_2^2+\|\mathbf{m}\|_2^2-2\mathbf{q}\cdot\mathbf{m}
+=2(1-\cos\theta)
+$$
+
+在这一理想条件下，`D < 1.5` 对应 `cos(theta) > 0.25`。这说明初筛故意留出较宽候选集，避免仅靠字面相似度漏掉语义相关记忆；但最终距离定义仍由 ChromaDB collection 的配置决定。
+
+### 第三步：CrossEncoder 精排
+
+候选文档与用户问题组成成对输入：
+
+~~~python
+pairs = [[user_message, doc] for doc, meta in candidate_docs]
+scores = reranker_model.predict(pairs)
+~~~
+
+CrossEncoder 的概念输入可以写为：
+
+$$
+\text{[CLS]}\ q_1\ldots q_m\ \text{[SEP]}\ d_1\ldots d_k\ \text{[SEP]}
+$$
+
+问题和文档在同一次 Transformer 编码中交互，而不是先分别编码后只计算两个固定向量的相似度。自注意力的基本形式为：
+
+$$
+\operatorname{Attention}(Q,K,V)=
+\operatorname{Softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
+$$
+
+模型输出一个相关性分数，代码随后按分数降序排列，只保留 `score > 0` 且最多 3 条：
+
+$$
+\mathcal{R}(q)=\operatorname{Top3}\{d_i\in\mathcal{C}(q)\mid s(q,d_i)>0\}
+$$
+
+每条保留下来的动态记忆会附带 metadata 中的时间戳，形成：
+
+~~~text
+[2026-05-20 18:30:00] 主人最喜欢吃三文鱼
+~~~
+
+## 5.3 Prompt 融合
+
+RAG 分支最终将以下信息拼成一个发送给 DeepSeek 的 `final_prompt`：
+
+1. 芯宝名称和角色设定。
+2. 好感度数值和 Mood。
+3. 当前真实时间，用于解释“今天、昨天、上周”。
+4. 静态知识检索结果。
+5. 带时间戳的动态记忆。
+6. 最近 10 条进程内对话历史。
+7. 当前用户问题。
+
+提示词还要求模型：使用动态记忆时添加来源脚注；私人信息查不到时明确说不知道；通用历史、文学和科学知识不必受本地资料限制。
+
+闲聊分支不执行上下文检索，只拼接角色、好感度、时间、最近 10 条历史和当前问题。
+
+# 六、流式回答、表情和语音
+
+## 6.1 SSE 首包和文本流
+
+后端使用 `Response(stream_with_context(generate_stream()), mimetype='text/event-stream')` 返回 SSE。`generate_stream()` 的顺序是：
+
+1. 先发送 `{favorability, change}`，前端收到 `up` 或 `down` 后立即切换机器人表情。
+2. 以 `stream=True` 请求 DeepSeek，逐行读取 `data: ...`。
+3. 从 `choices[0].delta.content` 取出增量文本，逐段发送为 `{chunk: content}`。
+4. DeepSeek 返回 `[DONE]` 后结束文本循环。
+5. 如果本轮有好感度变化，把提示文本作为最后一个 chunk 追加。
+
+前端不能假设一次网络读取就是一条完整 SSE 消息，因此使用：
+
+~~~javascript
+buffer += decoder.decode(value, { stream: true });
+const lines = buffer.split('\n');
+buffer = lines.pop();
+~~~
+
+最后一行保留在 `buffer` 中，等下一次读取拼接，避免 JSON 被网络分片截断。
+
+## 6.2 TTS 和播放兜底
+
+回答完成后，后端对文本执行 `sanitize_tts_text()`：去掉 `[表情]`、括号动作、Markdown 标记和不适合播报的符号；再用 `limit_tts_text()` 限制句数和最大字符数。
+
+随后按配置选择：
+
+- `edge_tts`：生成 `.mp3`。
+- `indextts`：请求本地 Index-TTS 服务生成 `.wav`；失败时按配置回退到 Edge-TTS。
+
+生成前会清理超过 180 秒的旧音频。后端先尝试 `play_audio_file()` 在本机播放，再把 `/static/<filename>` 放进 `done` 事件；前端收到后再次设置 `audio` 的 `src` 并播放，作为浏览器侧兜底。
+
+最终结束事件大致包含：
+
+~~~json
+{
+  "done": true,
+  "timestamp": "2026-05-21 20:00:00",
+  "audio_url": "/static/reply_ab12cd34.mp3",
+  "local_audio": {"played": true}
+}
+~~~
+
+# 七、长期记忆：回答之后的异步闭环
+
+回答和音频完成后，后端追加本次用户消息与机器人回答到 `chat_history`，然后启动：
+
+~~~python
+threading.Thread(
+    target=extract_and_save_memory,
+    args=(user_message,)
+).start()
+~~~
+
+`extract_and_save_memory()` 会再次调用 DeepSeek，但使用的是专门的提取提示词：
+
+~~~text
+陈述句 | 实体1,实体2
+~~~
+
+例如：
+
+~~~text
+主人最喜欢吃三文鱼 | 日料,三文鱼
+~~~
+
+如果模型返回“无”，或者返回内容过长，函数直接放弃保存。有效结果会经历以下步骤：
+
+1. 将整段提取结果做 Embedding，并用其 MD5 前 12 位作为记忆 ID。
+2. 将文本、向量和 `type=user_preference`、`source=dynamic_memory`、`timestamp` 等 metadata `upsert` 到 `qbit_memory`。
+3. 把长度大于 1 的实体词追加到 `dynamic_keywords.txt`。
+
+于是下一次对话会形成闭环：
+
+~~~text
+用户说出长期信息
+  → DeepSeek 提取陈述句和实体词
+  → ChromaDB 保存向量记忆
+  → dynamic_keywords.txt 增加强制触发词
+  → 后续提问更容易进入 RAG
+  → 向量召回 + CrossEncoder 精排
+  → Prompt 使用带时间戳的记忆
+~~~
+
+这个机制是“自动记忆候选写入”，不是无条件永久相信模型输出。项目同时提供 `/api/memories` 管理接口，前端可以查看、手动添加、修改和删除动态记忆。
+
+# 八、主要 API 和状态边界
+
+| 接口 | 方法 | 作用 |
+| --- | --- | --- |
+| `/api/health` | GET | 返回后端、模型和 GPU 就绪状态 |
+| `/api/settings` | POST | 保存主人设定和 DeepSeek API Key |
+| `/api/settings/status` | GET | 只返回是否存在 API Key |
+| `/api/chat` | POST | 执行完整聊天链路并返回 SSE |
+| `/api/upload` | POST | 保存上传文件并写入一条固定处理结果 |
+| `/api/history` | GET/DELETE | 读取或清空进程内聊天历史 |
+| `/api/memories` | GET/POST | 查看或手动添加长期记忆 |
+| `/api/memories/<id>` | PUT/DELETE | 修改或删除单条长期记忆 |
+
+需要区分三种状态：
+
+- **短期记忆**：`chat_history` 是 Python 进程内列表，只保留最近消息供 Prompt 使用；后端重启后清空。
+- **长期记忆**：ChromaDB 中的文档、向量和 metadata，重启后仍可查询。
+- **配置状态**：`config.json` 和 `favorability.json` 单独持久化，不等同于对话历史。
+
+另外，当前 `/api/upload` 只完成文件保存和固定回复，并没有把任意上传文件自动解析、切块并加入 RAG；这是现阶段的功能边界。
+
+# 九、答辩时可以怎样概括
+
+芯宝的核心设计不是“让大模型记住一切”，而是把不同类型的状态放在不同层：
+
+1. 用规则和轻量分类器决定是否值得检索，减少无意义的向量查询和云端上下文。
+2. 用本地 Embedding 做高召回，再用 CrossEncoder 做低数量、高精度的重排。
+3. 把静态知识、动态记忆、短期历史、好感度和当前时间分层拼入 Prompt。
+4. 用 SSE 让文字、表情和语音在用户可感知的时间内逐步到达。
+5. 在回答完成后异步提取长期记忆，避免记忆写入拖慢当前响应。
+
+因此，芯宝是一个“本地状态管理 + 本地检索模型 + 云端生成模型 + 桌面交互”的组合系统。它的可解释性来自明确的路由规则、可追踪的 metadata、可管理的记忆接口和可以从源码复现的请求时序。

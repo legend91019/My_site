@@ -1,7 +1,7 @@
 ---
 title: "Tokenizer(三)，赏析MiniMind的Tokenizer"
 summary: "从一个真实小模型项目出发，看看工程里的Tokenizer到底长什么样"
-date: 2026-07-10
+date: 2026-07-11
 tags: ["大模型","基础学习"]
 category: "学习指南"
 draft: false
