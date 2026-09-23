@@ -6,9 +6,9 @@ export const siteConfig = {
   github: "https://github.com/legend91019/My_site",
   nav: [
     { href: "/", label: "首页" },
-    { href: "/posts", label: "文章" },
-    { href: "/search", label: "搜索" },
-    { href: "/about", label: "关于" },
+    { href: "/posts/", label: "文章" },
+    { href: "/search/", label: "搜索" },
+    { href: "/about/", label: "关于" },
   ],
   seo: {
     defaultOgImage: "/og-default.png",

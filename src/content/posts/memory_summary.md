@@ -4,7 +4,7 @@ summary: "个人总结agent memory，通过论文和真实harness:claude code, p
 date: 2026-09-07
 tags: ["agent", "memory"]
 category: "论文解读"
-draft: false
+draft: true
 ---
 
 ## [MemGPT](https://arxiv.org/pdf/2310.08560)
