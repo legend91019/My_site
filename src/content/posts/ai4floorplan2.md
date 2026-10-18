@@ -1,7 +1,7 @@
 ---
 title: "个人对 AI for Floorplan 的探索（二）：从局部动作到全局顺序"
-summary: "按时间顺序复盘我们在 FloorSet 上做过的实验：哪些 AI 入口被证伪，哪些漂亮数字只是对照不公平，以及为什么最终把 AI 放在可执行全局顺序的生成，而不是局部动作选择或在线调度上。"
-date: 2026-10-17
+summary: "按时间顺序复盘我们在 FloorSet 上做过的实验：从被证伪的局部动作、坐标回归和神经 selector，到最终形成 learned global proposal、传统 packing 与 one-sided risk guard 组合的核心方法。"
+date: 2026-10-18
 tags: ["agent", "eda", "floorplan", "model"]
 category: "真实问题"
 draft: false
@@ -9,7 +9,7 @@ draft: false
 
 # 从“让 LLM 直接做 Floorplan”到“学习可执行的全局顺序”
 
-上一篇文章已经介绍了 [FloorSet 的问题定义、HPWL、约束、官方评分和 B\*-tree](/posts/ai4floorplan/)。这一篇不再重复基础知识，只记录我们的实验探索过程：我们为什么做一个实验、看到了什么、哪里判断错了，以及下一步为什么改变方向。
+上一篇文章已经介绍了 [FloorSet 的问题定义、HPWL、约束、官方评分和 B\*-tree](/posts/ai4floorplan/)。这一篇不再重复基础知识，只记录我们的实验探索过程：我们为什么做一个实验、看到了什么、哪里判断错了，以及下一步为什么改变方向。文章最初写到 neural selector 的正式负结果；随后两轮共 600 个全新 identity、1,800 个状态的冻结确认，又把 learned proposer 的泛化收益和剩余安全风险分开验证。到这里，一条真正可检验的核心方法才逐渐成形。
 
 这段探索最开始有一个很自然的想法：既然 floorplanning 是一个复杂的序列决策问题，LLM、强化学习或其他神经网络是不是能比传统规则做出更聪明的选择？
 
@@ -41,6 +41,8 @@ draft: false
 | 10 月 15–16 日 | Proxy/official 错序复核 | 中止来自 bug，还是来自真实目标错配？ | 确认为真实风险，v3 安全门不通过 |
 | 10 月 16 日 | Strong-incumbent v4 | 不看 official label，能否限制搜索回退？ | 300-state confirmation 通过 |
 | 10 月 16–17 日 | 正式 neural selector | 学习模型能否超过强解析 surrogate？ | 安全通过，AI 增量 gate 失败 |
+| 10 月 18 日 | Fresh-proposer confirmation-v1 | learned order 在完全新 identity 上是否仍优于传统 proposal？ | 强泛化信号成立，安全 gate 失败 |
+| 10 月 18 日 | Acceptance-guard confirmation-v2 | label-free guard 能否保住收益并消除回退？ | 回退降至 2/900，绝对零回退 gate 仍失败 |
 
 下面按这个顺序展开。
 
@@ -559,6 +561,134 @@ Neural incremental gate: FAIL
 
 它不会改变科学结论，但会改变后续工程：如果还训练类似 groupwise selector，应先批量化 group loss 和数据加载，再考虑换更大的 GPU。统一机器有助于可比性，却不能代替性能剖析。
 
+## 第六阶段：在全新 identity 上确认 proposer，并把安全问题单独拿出来
+
+前面的 48-state diagnostic 与 24-case selector confirmation 已经帮助我们找到方向，但它们不适合承担最终的泛化结论：一些 identity 参与过多轮方法设计，状态数量也不够大。尤其是 learned-order proposer 的 8.06% 仍然是 exact best-of-K 上界，而正式 selector 实验主要回答的是“谁来挑”，没有单独回答 learned proposal 在全新电路上是否真的优于传统 proposal。
+
+因此后面两轮实验不再更换网络，而是把两个问题拆开：
+
+1. 在严格隔离的新 identity 上，learned proposer 的端到端可部署收益是否存在？
+2. 如果收益存在，能否用完全 label-free 的规则控制少量 proxy/official 排序反转？
+
+### 15. Fresh-proposer confirmation-v1：强正信号第一次在大规模新身份上成立
+
+#### 为什么需要重新做 300 个 identity
+
+confirmation-v1 从 FloorSet 官方 1M training corpus 中确定性抽取 300 个 fresh identities。它们与 proposer 的 12,000 个训练 identity、selector 的 2,500 个训练/验证 identity 零重叠。每个 identity 生成 1、3、10 秒三个 strong incumbent，共 900 个部署状态。
+
+为了让比较只反映 proposer 的质量，实验固定了其余所有组件：
+
+- 每个 proposal pool 都只有 K=16 个候选；
+- 使用同一个 v4 strong-incumbent、deterministic repacker、hard-feasibility filter 和解析 selector；
+- learned 侧评估三个独立 checkpoint；
+- traditional 侧包含 legacy、constraint、random 三个 pool；
+- 主对照不是任选一个传统方法，而是**逐状态取三个传统 pool 的最好 realized gain**；
+- official cost 只用于事后评价，不参与 selector 决策；no-op 始终存在。
+
+900/900 个状态全部落盘，没有缺失、额外或重复；所有被采纳布局均 hard-feasible，8 个 worker 的错误日志全部为空。统计使用 10,000 次 identity-level bootstrap，避免把同一 identity 的三个预算错误地当成三个独立样本。60-case final-integration split 仍然没有打开。
+
+#### 结果：learned proposal 不是小样本幻觉
+
+这里的 gain 是 official cost 的绝对下降量，不是百分比。
+
+| learned seed | learned mean gain | 逐状态最强传统 proposer | 配对优势 | identity-bootstrap 95% CI | 改善 / 回退 / 弃权 |
+|---:|---:|---:|---:|---:|---:|
+| 20261014 | 0.417253 | 0.069421 | **+0.347832** | [0.295529, 0.400285] | 503 / 26 / 371 |
+| 20261015 | **0.424041** | 0.069421 | **+0.354621** | [0.302093, 0.406815] | 495 / 23 / 382 |
+| 20261016 | 0.409143 | 0.069421 | **+0.339722** | [0.289294, 0.391988] | 504 / 25 / 371 |
+
+中位 seed 20261014 相对强传统对照的优势在三个预算上分别为：
+
+| incumbent 搜索预算 | paired mean delta |
+|---:|---:|
+| 1 秒 | +0.401518 |
+| 3 秒 | +0.347493 |
+| 10 秒 | +0.294484 |
+
+incumbent 越强，剩余改进空间越小，因此优势随预算下降是合理的；重要的是三档都明显为正。top-two positive excess share 只有 3.16%，说明结果也不是由两个异常 identity 撑起来的。
+
+更关键的是，learned pool 的 realized gain 几乎等于 pool-oracle gain。例如 seed 20261014 的两者分别是 0.417253 和 0.418436。这意味着解析 selector 已经能兑现绝大部分 proposal recall；“池子里有好解但没人认得出来”不再是主要矛盾。
+
+但预注册总 gate 仍然是 **FAIL**。三个 seed 分别有 23–26 个状态回退，回退率约 2.6%–2.9%，而逐状态最强传统对照是零回退。这个失败很有信息量：**learned proposer 的泛化价值已经成立，剩余瓶颈被收缩成少量 learned-candidate 上的 surrogate/official 排序反转。**
+
+### 16. Acceptance guard：收益几乎没损失，绝对零回退仍差两个反例
+
+confirmation-v1 之后，我们没有马上训练更大的 selector，而是把 selection 改写成 selective prediction：系统不必对每个候选都给出答案，只在证据足够强时采纳 learned proposal，其余状态直接 abstain。
+
+#### 开发与确认必须再次隔离
+
+旧 confirmation-v1 的 300 个 identity 被降级为 guard 开发数据，并按 identity 固定拆成 200 fit / 100 calibration；同一 identity 的 1、3、10 秒状态不会跨 split。候选 guard 包括 surrogate margin、解析 Pareto 规则和 L2 logistic classifier。
+
+最终在 calibration 上冻结的不是复杂 classifier，而是一条简单规则：
+
+```text
+accept learned candidate
+iff selected_vs_noop_surrogate_margin >= 0.02
+```
+
+然后重新抽取一批 300 个全新 identity 作为 confirmation-v2，共 900 个状态。它们与 proposer 训练集、selector 数据和本轮 guard 开发身份都零重叠。主 seed、K=16、三档预算、特征 schema、阈值与全部 gate 在运行前冻结。
+
+#### 冻结 guard 的正式成绩
+
+主 seed 20261014 的结果为：
+
+| 指标 | 结果 |
+|---|---:|
+| identity / 状态 | 300 / 900 |
+| guard 接受数 | 528 |
+| 原始 selector 回退 | 13 / 900（1.444%） |
+| guard 后回退 | **2 / 900（0.222%）** |
+| mean raw gain | 0.456398 |
+| mean guarded gain | **0.456288** |
+| 原始收益保留率 | **99.976%** |
+| identity-bootstrap 95% CI | [0.387836, 0.524973] |
+| 1 / 3 / 10 秒 mean gain | 0.531208 / 0.464438 / 0.373217 |
+| 逐状态最强传统 proposer | 0.105818 |
+| guarded learned 相对传统优势 | **约 +0.350470** |
+| 输出合法率 | 900 / 900 |
+
+三个模型 seed 的方向一致：平均 guarded gain 分别为 0.456288、0.461127 和 0.457094；回退分别为 2、4 和 3 次。部分 seed 的收益保留率略高于 100%，是因为 guard 恰好拒绝了若干负收益候选，不是计算异常。
+
+从 13 次降到 2 次、同时只损失 0.024% 收益，说明 margin guard 确实抓住了风险信号。但预注册总 gate 仍然是 **FAIL**，唯一失败项是 `zero_regressions`。这两个反例是：
+
+1. case 77040，3 秒，112 blocks：margin 0.029501，official cost 回退 0.014924；
+2. case 948416，1 秒，115 blocks：margin 0.026351，official cost 回退 0.003336。
+
+它们都合法，也都位于 block-count 高端。错误不是 packer 或 legalizer 失效，而是 surrogate 与 official cost 在非常小的差值上给出了相反排序。
+
+揭盲后把阈值从 0.02 提到 0.03，可以得到 507 次接受、零回退、mean gain 0.455593，并保留 99.824% 的 raw gain。这个数字很诱人，但不能写成正式成功：0.03 是看过两个反例后才选择的，已经使用了 confirmation-v2 的信息。它现在只能生成一个新假设，必须在第三个完全独立的 holdout 上预注册验证。
+
+### 17. 到这里，核心方法才真正出现
+
+回头看，最终出现的并不是一个“端到端神经网络 floorplanner”，而是一套分工明确的混合方法：
+
+```text
+Circuit + strong incumbent
+          ↓
+learned proposer 预测全局 order / shape
+          ↓
+生成 K 个结构化候选
+          ↓
+传统 packer / legalizer 产生合法几何
+          ↓
+解析 surrogate 排序，并保留显式 no-op
+          ↓
+one-sided risk guard：有把握才采纳，否则 abstain
+```
+
+可以把它概括为 **Risk-Calibrated Selective Neural Proposal for Floorplanning**：面向 floorplanning 的风险校准选择性神经提案。
+
+这条方法中的每个组件都有单独证据支撑：
+
+- reference-order oracle 证明全局顺序含有传统规则难以恢复的结构信号；
+- learned-order proposer 证明这种信号可以跨实例学习，而不是必须读取当前 case 的 reference；
+- 两轮各 300 个全新 identity 的确认表明收益跨数据、模型 seed 和 incumbent 预算复现；
+- deterministic packing 与 exact feasibility filter 保证神经网络不必直接承担连续坐标合法性；
+- 解析 selector 已能兑现绝大部分 pool-oracle gain，没有必要为了“全流程都用 AI”再堆一个网络；
+- margin guard 表明少量 proxy/official 风险可以被 selective prediction 大幅压低，而且 safety tax 很小。
+
+因此可以说“核心方法诞生了”，但不能说“最终方法已经验证成功”。目前已经被数据支持的是 proposer 的增量价值和 guard 的强风险压缩能力；尚未被独立支持的是 0.03 阈值能否实现绝对零回退。方法与最终 claim 必须分开：前者已经清晰，后者还差一个预注册的新 holdout，以及之后一次仍未打开的 60-case final integration。
+
 ---
 
 ## 把所有实验放在一起看
@@ -577,8 +707,10 @@ Neural incremental gate: FAIL
 | Learned-order proposer | offline best-of-16 上界约 8.06% | 明显胜过传统 proposal | proposal 路线继续 |
 | Strong-incumbent v4 | 300-state confirmation 零最终回退 | 1.06 HPWL guard 可控制风险 | 采用保守 guard |
 | Neural selector | 安全，但 median gain 0.208445 | surrogate 为 0.211960，接近 oracle | 停止扩大 neural selector |
+| Fresh-proposer confirmation-v1 | fresh 900-state learned gain 0.409–0.424 | 最强传统仅 0.069421 | proposer 泛化 PASS，安全 FAIL |
+| Acceptance guard confirmation-v2 | 回退 13/900→2/900，保留 99.976% 收益 | 简单 margin 胜过复杂 classifier | 方法成形，零回退待新 holdout |
 
-## 截至 2026 年 10 月 17 日，我们真正学到了什么
+## 截至 2026 年 10 月 18 日，我们真正学到了什么
 
 ### 1. “动作有价值”与“需要 AI”是两回事
 
@@ -594,36 +726,44 @@ Macro Agent 的 +8.452% 最终来自额外计算。自适应 gate 看似聪明�
 
 ### 4. Proposal generation 与 proposal selection 是两个研究问题
 
-Learned proposer 回答“模型能否提出传统规则覆盖不到的好候选”，答案是可以。正式 selector 回答“模型能否比强 surrogate 更好地挑出候选”，这轮答案是否定的。把两者混成一个端到端 accuracy，会同时掩盖 proposer 的成功和 selector 的失败。
+Learned proposer 回答“模型能否提出传统规则覆盖不到的好候选”，两轮 fresh confirmation 给出的答案已经是可以。正式 selector 回答“神经模型能否比强 surrogate 更好地挑出候选”，答案是否定的。把两者混成一个端到端 accuracy，会同时掩盖 proposer 的成功和 neural selector 的失败。
 
 ### 5. 部署约束会改变最优方法
 
-Exact oracle 能看到 official baseline，比赛算法不能。HPWL guard 明知会错杀一些实际改善的候选，仍然有价值，因为它只使用部署时可见的信息。一个略保守但可执行的规则，比依赖隐藏标签的完美回退更真实。
+Exact oracle 能看到 official baseline，比赛算法不能。HPWL guard 和 surrogate-margin guard 明知会错杀一些实际改善的候选，仍然有价值，因为它们只使用部署时可见的信息。一个略保守但可执行的规则，比依赖隐藏标签的完美回退更真实。真正要优化的也不是普通分类 accuracy，而是 one-sided risk：宁可少接受一部分候选，也要控制错误采纳。
 
 ### 6. 保护门和负结果都是研究产出
 
 两次远端中止暴露了坐标契约与 proxy/official 错序；v3 的失败阻止了带风险的 incumbent 进入训练；正式 incremental gate 又阻止我们把“比 no-op 好”包装成“AI 解决了 selection”。这些 gate 没有拖慢研究，反而让最终结论可以被解释。
 
+### 7. 核心方法可以诞生在总 gate 通过之前
+
+confirmation-v2 的总 gate 是 FAIL，但失败只来自 2/900 次微小回退；与此同时，proposer 相对强传统对照约 +0.350470 的优势、99.976% 的收益保留率和三档预算上的稳定性都已经成立。因此“方法是否清晰”与“最强安全 claim 是否已经证实”不能混为一谈。前者回答该把学习放在哪里、组件怎样分工；后者要求一次全新的预注册检验。
+
 ## 当前最诚实的研究结论
 
-我们仍然没有证明一个 AI floorplanner 能在 hidden test 上稳定提高比赛分数。24-case confirmation 属于冻结的公开验证，不是最终 60-case integration，更不是比赛 hidden test；60-case final split 至今没有查看。因此，本文的结论是研究方向判断，不是最终竞赛成绩声明。
+我们仍然没有证明一个 AI floorplanner 能在比赛 hidden test 上稳定提高分数，也没有证明事后发现的 0.03 guard 能在新数据上做到绝对零回退。60-case final split 至今没有查看。因此，本文不能以“最终比赛方案已经成功”收尾。
 
-但“AI 应该放在哪里”现在已经比最初清楚得多：
+但现在已经可以比 10 月 17 日更进一步：我们不只有一个模糊方向，而是形成了一套具有明确作用边界、可复核增量和单一剩余瓶颈的核心方法：
 
 ```text
-传统方法生成 strong incumbent
+Circuit + 传统方法生成 strong incumbent
         ↓
-神经 proposer 预测 reference-like 全局 block order
+神经 proposer 预测可迁移的全局 block order / shape
         ↓
-deterministic packer 生成真实 geometry
+K 个结构化 proposal
         ↓
-exact feasibility filter 删除非法候选
+deterministic packer / legalizer 生成合法 geometry
         ↓
-解析 surrogate + no-op abstention 选择候选
+解析 surrogate + exact feasibility + 显式 no-op
         ↓
-可选的短时 EA→SA polish
+one-sided risk guard：有把握才接受，否则 abstain
+        ↓
+可选的短时传统搜索 polish
 ```
 
-这条路线里，神经网络负责传统手工规则最难覆盖的部分：**生成有身份对应、跨 block 的全局结构候选**。Packer 负责几何合法化，解析 surrogate 负责当前已经接近饱和的选择问题，EA/SA 负责最后的小范围搜索。LLM 暂时不进入秒级高频决策循环；它更适合实验设计、日志分析、失败归因或低频策略建议，而不是从零画布局或替代每一步数值优化。
+这条路线里，神经网络负责传统手工规则最难覆盖的部分：**生成有身份对应、跨 block 的全局结构候选**。Packer 负责几何合法化，解析 surrogate 负责排序，risk guard 负责部署时的保守接受，EA/SA 可以负责最后的小范围搜索。LLM 暂时不进入秒级高频决策循环；它更适合实验设计、日志分析、失败归因或低频策略建议，而不是从零画布局或替代每一步数值优化。
 
-下一阶段不应该继续堆 selector 深度，而应该围绕 proposer 做更严格的泛化实验：扩大训练 identities，比较不同图结构与排序目标，在真正冻结的新 identities 上测 proposal recall，并研究如何让一个模型提出多样而非高度相关的 order。只有当新的 proposal pool 再次产生解析 surrogate 无法处理的稳定选择缺口时，才有理由重新引入更复杂的 neural selector。
+下一阶段也已经很具体：预注册带安全缓冲的 0.03 margin guard，或者预注册 conformal / upper-confidence 型 one-sided guard，在第三个完全独立的 300-identity holdout 上验证零回退、收益保留率、三档预算和 bootstrap 下界。只有这一步通过，才应该打开一次 60-case final integration。
+
+所以，截至这次更新，最诚实的总结是：**核心方法已经诞生；learned proposal 的价值已经被多轮新身份实验支持；安全 guard 已经非常接近目标，但“绝对零回退”仍是下一轮要证伪或证实的假设。**
